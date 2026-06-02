@@ -14,22 +14,22 @@ func opts() Options { return Options{Roots: defaultRoots} }
 
 func TestCreateWhenAbsent(t *testing.T) {
 	t.Parallel()
-	desired := []LinkSpec{{Target: "/home/u/.claude/skills/go", Dest: "/src/team/p/skill/go", SourceName: "team"}}
+	desired := []LinkSpec{{Target: "/home/u/.claude/skills/go", Dest: "/src/team/p/skills/go", SourceName: "team"}}
 	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
-	want := []Op{{Kind: OpCreate, Target: "/home/u/.claude/skills/go", Dest: "/src/team/p/skill/go"}}
+	want := []Op{{Kind: OpCreate, Target: "/home/u/.claude/skills/go", Dest: "/src/team/p/skills/go"}}
 	if !reflect.DeepEqual(plan.Ops, want) {
 		t.Fatalf("ops = %+v, want %+v", plan.Ops, want)
 	}
-	if len(plan.Conflicts) != 0 || len(plan.Shadowed) != 0 {
-		t.Fatalf("unexpected conflicts/shadows: %+v %+v", plan.Conflicts, plan.Shadowed)
+	if len(plan.Conflicts) != 0 || len(plan.Shadows) != 0 || len(plan.Problems) != 0 {
+		t.Fatalf("unexpected non-op outcomes: %+v", plan)
 	}
 }
 
 func TestNoOpWhenAlreadyCorrect(t *testing.T) {
 	t.Parallel()
-	desired := []LinkSpec{{Target: "/t/go", Dest: "/src/team/p/skill/go", SourceName: "team"}}
+	desired := []LinkSpec{{Target: "/t/go", Dest: "/src/team/p/skills/go", SourceName: "team"}}
 	world := World{Entries: map[string]Entry{
-		"/t/go": {Kind: Symlink, Dest: "/src/team/p/skill/go"},
+		"/t/go": {Kind: Symlink, Dest: "/src/team/p/skills/go"},
 	}}
 	plan := Reconcile(desired, world, opts())
 	if len(plan.Ops) != 0 {
@@ -39,12 +39,12 @@ func TestNoOpWhenAlreadyCorrect(t *testing.T) {
 
 func TestReplaceWhenManagedLinkWrong(t *testing.T) {
 	t.Parallel()
-	desired := []LinkSpec{{Target: "/t/go", Dest: "/src/team/p/skill/go", SourceName: "team"}}
+	desired := []LinkSpec{{Target: "/t/go", Dest: "/src/team/p/skills/go", SourceName: "team"}}
 	world := World{Entries: map[string]Entry{
-		"/t/go": {Kind: Symlink, Dest: "/src/personal/old/skill/go"}, // managed (under a root) but stale
+		"/t/go": {Kind: Symlink, Dest: "/src/personal/old/skills/go"}, // managed (under a root) but stale
 	}}
 	plan := Reconcile(desired, world, opts())
-	want := []Op{{Kind: OpReplace, Target: "/t/go", Dest: "/src/team/p/skill/go", OldDest: "/src/personal/old/skill/go"}}
+	want := []Op{{Kind: OpReplace, Target: "/t/go", Dest: "/src/team/p/skills/go", OldDest: "/src/personal/old/skills/go"}}
 	if !reflect.DeepEqual(plan.Ops, want) {
 		t.Fatalf("ops = %+v, want %+v", plan.Ops, want)
 	}
@@ -53,10 +53,10 @@ func TestReplaceWhenManagedLinkWrong(t *testing.T) {
 func TestOrphanRemoval(t *testing.T) {
 	t.Parallel()
 	world := World{Entries: map[string]Entry{
-		"/t/gone": {Kind: Symlink, Dest: "/src/team/p/skill/gone"},
+		"/t/gone": {Kind: Symlink, Dest: "/src/team/p/skills/gone"},
 	}}
 	plan := Reconcile(nil, world, opts())
-	want := []Op{{Kind: OpRemove, Target: "/t/gone", OldDest: "/src/team/p/skill/gone"}}
+	want := []Op{{Kind: OpRemove, Target: "/t/gone", OldDest: "/src/team/p/skills/gone"}}
 	if !reflect.DeepEqual(plan.Ops, want) {
 		t.Fatalf("ops = %+v, want %+v", plan.Ops, want)
 	}
@@ -64,7 +64,7 @@ func TestOrphanRemoval(t *testing.T) {
 
 func TestForeignFileIsConflictNeverClobbered(t *testing.T) {
 	t.Parallel()
-	desired := []LinkSpec{{Target: "/t/go", Dest: "/src/team/p/skill/go", SourceName: "team"}}
+	desired := []LinkSpec{{Target: "/t/go", Dest: "/src/team/p/skills/go", SourceName: "team"}}
 	world := World{Entries: map[string]Entry{
 		"/t/go": {Kind: Foreign},
 	}}
@@ -79,7 +79,7 @@ func TestForeignFileIsConflictNeverClobbered(t *testing.T) {
 
 func TestForeignSymlinkIsConflict(t *testing.T) {
 	t.Parallel()
-	desired := []LinkSpec{{Target: "/t/go", Dest: "/src/team/p/skill/go", SourceName: "team"}}
+	desired := []LinkSpec{{Target: "/t/go", Dest: "/src/team/p/skills/go", SourceName: "team"}}
 	world := World{Entries: map[string]Entry{
 		"/t/go": {Kind: Symlink, Dest: "/somewhere/else/go"}, // not under any root => not ours
 	}}
@@ -99,25 +99,25 @@ func TestForeignSymlinkNotDesiredIsLeftAlone(t *testing.T) {
 	}}
 	plan := Reconcile(nil, world, opts())
 	if len(plan.Ops) != 0 || len(plan.Conflicts) != 0 {
-		t.Fatalf("foreign, undesired symlink must be left alone, got %+v %+v", plan.Ops, plan.Conflicts)
+		t.Fatalf("foreign, undesired symlink must be left alone, got %+v", plan)
 	}
 }
 
 func TestPrecedenceWinnerAndShadow(t *testing.T) {
 	t.Parallel()
 	desired := []LinkSpec{
-		{Target: "/t/go", Dest: "/src/personal/p/skill/go", SourceName: "personal"},
-		{Target: "/t/go", Dest: "/src/team/p/skill/go", SourceName: "team"}, // team has higher precedence
+		{Target: "/t/go", Dest: "/src/personal/p/skills/go", SourceName: "personal"},
+		{Target: "/t/go", Dest: "/src/team/p/skills/go", SourceName: "team"}, // team has higher precedence
 	}
 	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
-	want := []Op{{Kind: OpCreate, Target: "/t/go", Dest: "/src/team/p/skill/go"}}
+	want := []Op{{Kind: OpCreate, Target: "/t/go", Dest: "/src/team/p/skills/go"}}
 	if !reflect.DeepEqual(plan.Ops, want) {
 		t.Fatalf("winner ops = %+v, want %+v", plan.Ops, want)
 	}
-	if len(plan.Shadowed) != 1 {
-		t.Fatalf("expected one shadow, got %+v", plan.Shadowed)
+	if len(plan.Shadows) != 1 {
+		t.Fatalf("expected one shadow, got %+v", plan.Shadows)
 	}
-	s := plan.Shadowed[0]
+	s := plan.Shadows[0]
 	if s.SourceName != "personal" || s.WonBy != "team" || s.Target != "/t/go" {
 		t.Fatalf("shadow = %+v, want personal shadowed by team at /t/go", s)
 	}
@@ -125,79 +125,84 @@ func TestPrecedenceWinnerAndShadow(t *testing.T) {
 
 func TestDuplicateSameLinkIsNotShadow(t *testing.T) {
 	t.Parallel()
-	// The exact same link declared twice contributes nothing extra and is not
-	// a precedence override.
+	// The exact same link declared twice contributes nothing extra and is not a
+	// precedence override.
 	desired := []LinkSpec{
-		{Target: "/t/go", Dest: "/src/team/p/skill/go", SourceName: "team"},
-		{Target: "/t/go", Dest: "/src/team/p/skill/go", SourceName: "team"},
+		{Target: "/t/go", Dest: "/src/team/p/skills/go", SourceName: "team"},
+		{Target: "/t/go", Dest: "/src/team/p/skills/go", SourceName: "team"},
 	}
 	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
-	if len(plan.Shadowed) != 0 {
-		t.Fatalf("identical duplicate must not shadow, got %+v", plan.Shadowed)
+	if len(plan.Shadows) != 0 {
+		t.Fatalf("identical duplicate must not shadow, got %+v", plan.Shadows)
 	}
 	if len(plan.Ops) != 1 {
 		t.Fatalf("expected one create, got %+v", plan.Ops)
 	}
 }
 
-func TestDeterministicOrdering(t *testing.T) {
+func TestDestOutsideRootIsProblemNotCreate(t *testing.T) {
 	t.Parallel()
-	desired := []LinkSpec{
-		{Target: "/t/c", Dest: "/src/team/p/skill/c", SourceName: "team"},
-		{Target: "/t/a", Dest: "/src/team/p/skill/a", SourceName: "team"},
-		{Target: "/t/b", Dest: "/src/team/p/skill/b", SourceName: "team"},
-	}
-	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
-	got := []string{plan.Ops[0].Target, plan.Ops[1].Target, plan.Ops[2].Target}
-	want := []string{"/t/a", "/t/b", "/t/c"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ops not sorted by target: got %v, want %v", got, want)
-	}
-}
-
-func TestDestOutsideRootIsConflictNotCreate(t *testing.T) {
-	t.Parallel()
-	// A desired link whose destination is not under its source root is a planner
-	// input bug; it must become a conflict, never a create that the next run
-	// would see as foreign (manifesto 33).
+	// A desired link whose destination is not under its source root is an invalid
+	// desired model (a scanner/projection bug): a Problem, never a Conflict and
+	// never a create (manifesto 33).
 	desired := []LinkSpec{{Target: "/t/go", Dest: "/elsewhere/go", SourceName: "team"}}
 	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
-	if len(plan.Ops) != 0 {
-		t.Fatalf("out-of-root dest must not create, got ops %+v", plan.Ops)
+	if len(plan.Ops) != 0 || len(plan.Conflicts) != 0 {
+		t.Fatalf("out-of-root dest must not create or conflict, got %+v", plan)
 	}
-	if len(plan.Conflicts) != 1 || plan.Conflicts[0].Target != "/t/go" {
-		t.Fatalf("expected one conflict at /t/go, got %+v", plan.Conflicts)
+	if len(plan.Problems) != 1 || plan.Problems[0].Kind != ProblemDestOutsideRoot {
+		t.Fatalf("expected one ProblemDestOutsideRoot, got %+v", plan.Problems)
 	}
 }
 
-func TestUnknownSourceLinkIsConflict(t *testing.T) {
+func TestUnknownSourceLinkIsProblem(t *testing.T) {
 	t.Parallel()
-	// A link from a source with no configured root cannot be classified as
-	// managed, so it is rejected rather than created.
+	// A link from a source with no configured root cannot be validated, so it is
+	// a Problem (unknown source), not a Conflict and not an op.
 	desired := []LinkSpec{{Target: "/t/go", Dest: "/src/ghost/go", SourceName: "ghost"}}
 	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
-	if len(plan.Ops) != 0 || len(plan.Conflicts) != 1 {
-		t.Fatalf("unknown-source link must be a conflict with no ops, got ops=%+v conflicts=%+v", plan.Ops, plan.Conflicts)
+	if len(plan.Ops) != 0 || len(plan.Conflicts) != 0 {
+		t.Fatalf("unknown-source link must not create or conflict, got %+v", plan)
+	}
+	if len(plan.Problems) != 1 || plan.Problems[0].Kind != ProblemUnknownSource {
+		t.Fatalf("expected one ProblemUnknownSource, got %+v", plan.Problems)
 	}
 }
 
-func TestSameSourceDifferentDestIsConflict(t *testing.T) {
+func TestSameSourceDifferentDestIsAmbiguousProblem(t *testing.T) {
 	t.Parallel()
 	// One source contributing two different destinations to the same target is
-	// ambiguous: block the target instead of picking one by spelling (35).
+	// ambiguous: a Problem that blocks the target, not a Shadow and not an op (35).
 	desired := []LinkSpec{
-		{Target: "/t/go", Dest: "/src/team/a/skill/go", SourceName: "team"},
-		{Target: "/t/go", Dest: "/src/team/b/skill/go", SourceName: "team"},
+		{Target: "/t/go", Dest: "/src/team/a/skills/go", SourceName: "team"},
+		{Target: "/t/go", Dest: "/src/team/b/skills/go", SourceName: "team"},
 	}
 	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
 	if len(plan.Ops) != 0 {
 		t.Fatalf("ambiguous same-source target must not install, got ops %+v", plan.Ops)
 	}
-	if len(plan.Conflicts) != 1 || plan.Conflicts[0].Target != "/t/go" {
-		t.Fatalf("expected one conflict at /t/go, got %+v", plan.Conflicts)
+	if len(plan.Shadows) != 0 {
+		t.Fatalf("a blocked target must not also shadow, got %+v", plan.Shadows)
 	}
-	if len(plan.Shadowed) != 0 {
-		t.Fatalf("a blocked target must not also shadow, got %+v", plan.Shadowed)
+	if len(plan.Problems) != 1 || plan.Problems[0].Kind != ProblemAmbiguousTarget {
+		t.Fatalf("expected one ProblemAmbiguousTarget, got %+v", plan.Problems)
+	}
+}
+
+func TestLocalizedProblemStillPlansRest(t *testing.T) {
+	t.Parallel()
+	// A Problem on one target must not suppress a clean plan for another: the
+	// planner stays non-judgmental and localizes the problem.
+	desired := []LinkSpec{
+		{Target: "/t/bad", Dest: "/elsewhere/x", SourceName: "team"},          // ProblemDestOutsideRoot
+		{Target: "/t/good", Dest: "/src/team/p/skills/x", SourceName: "team"}, // clean create
+	}
+	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
+	if len(plan.Problems) != 1 {
+		t.Fatalf("expected one problem, got %+v", plan.Problems)
+	}
+	if len(plan.Ops) != 1 || plan.Ops[0].Target != "/t/good" || plan.Ops[0].Kind != OpCreate {
+		t.Fatalf("expected a clean create for /t/good alongside the problem, got %+v", plan.Ops)
 	}
 }
 
@@ -205,9 +210,9 @@ func TestGlobalOpOrderingAcrossCreateAndRemove(t *testing.T) {
 	t.Parallel()
 	// A create for a high target plus an orphan removal for a low target must
 	// come back globally sorted by target, not in discovery order.
-	desired := []LinkSpec{{Target: "/t/z", Dest: "/src/team/p/skill/z", SourceName: "team"}}
+	desired := []LinkSpec{{Target: "/t/z", Dest: "/src/team/p/skills/z", SourceName: "team"}}
 	world := World{Entries: map[string]Entry{
-		"/t/a": {Kind: Symlink, Dest: "/src/team/p/skill/a"}, // orphan, gets removed
+		"/t/a": {Kind: Symlink, Dest: "/src/team/p/skills/a"}, // orphan, gets removed
 	}}
 	plan := Reconcile(desired, world, opts())
 	if len(plan.Ops) != 2 {
