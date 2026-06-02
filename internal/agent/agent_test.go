@@ -67,10 +67,57 @@ func TestSupportsAndUnsupported(t *testing.T) {
 	}
 }
 
-func TestLookupUnknownAgent(t *testing.T) {
+func TestCodexAndCopilotSkillsOnly(t *testing.T) {
 	t.Parallel()
-	if _, ok := Default().Lookup(core.AgentCodexCLI); ok {
-		t.Error("codex-cli has no vendor spec yet and must not be in the default matrix")
+	cases := []struct {
+		id       core.AgentID
+		wantRoot string
+	}{
+		{core.AgentCodexCLI, "/home/u/.codex"},
+		{core.AgentCopilotCLI, "/home/u/.copilot"},
+	}
+	for _, tc := range cases {
+		ag, ok := Default().Lookup(tc.id)
+		if !ok {
+			t.Fatalf("%s must be in the default matrix", tc.id)
+		}
+		root := ag.Root("/home/u", noEnv)
+		if root != tc.wantRoot {
+			t.Errorf("%s root = %q, want %q", tc.id, root, tc.wantRoot)
+		}
+		skill, ok := ag.Target(root, core.KindSkill, "deploy")
+		if !ok || skill != tc.wantRoot+"/skills/deploy" {
+			t.Errorf("%s skill target = %q,%v, want %s/skills/deploy", tc.id, skill, ok, tc.wantRoot)
+		}
+		// Memory stays unsupported for codex and copilot (manifesto 18).
+		if ag.Supports(core.KindMemory) {
+			t.Errorf("%s must not support memory (manifesto 18)", tc.id)
+		}
+	}
+}
+
+func TestCodexHomeOverride(t *testing.T) {
+	t.Parallel()
+	ag, _ := Default().Lookup(core.AgentCodexCLI)
+	getenv := func(k string) string {
+		if k == "CODEX_HOME" {
+			return "/custom/codex"
+		}
+		return ""
+	}
+	if root := ag.Root("/home/u", getenv); root != "/custom/codex" {
+		t.Fatalf("root = %q, want /custom/codex (CODEX_HOME)", root)
+	}
+}
+
+func TestStillAbsentAgents(t *testing.T) {
+	t.Parallel()
+	// Agents without a confirmed vendor spec must stay out of the matrix, so a
+	// selection targeting them is reported unsupported rather than guessed.
+	for _, id := range []core.AgentID{core.AgentOpenCode, core.AgentCopilotVSCode, core.AgentPiDev} {
+		if _, ok := Default().Lookup(id); ok {
+			t.Errorf("%s has no confirmed vendor spec and must not be in the default matrix", id)
+		}
 	}
 }
 

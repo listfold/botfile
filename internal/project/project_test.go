@@ -73,23 +73,40 @@ func TestProjectSpecificComponent(t *testing.T) {
 
 func TestProjectUnsupportedAgentIsProblem(t *testing.T) {
 	t.Parallel()
-	// codex-cli has no vendor spec yet: each matched component for it is an
+	// opencode has no vendor spec yet: each matched component for it is an
 	// explicit unsupported problem, while claude-code still gets its links.
 	cfg := cfgWith(core.Selection{
 		SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
-		Agents: []core.AgentID{core.AgentClaudeCode, core.AgentCodexCLI},
+		Agents: []core.AgentID{core.AgentClaudeCode, core.AgentOpenCode},
 	})
 	res := Project(cfg, []Source{codingSource()}, agent.Default(), roots())
 	if len(res.Links) != 2 {
 		t.Fatalf("claude-code links = %+v, want 2", res.Links)
 	}
 	if len(res.Problems) != 2 {
-		t.Fatalf("want 2 unsupported problems for codex-cli, got %+v", res.Problems)
+		t.Fatalf("want 2 unsupported problems for opencode, got %+v", res.Problems)
 	}
 	for _, p := range res.Problems {
-		if p.Kind != ProblemUnsupported || p.Agent != core.AgentCodexCLI {
+		if p.Kind != ProblemUnsupported || p.Agent != core.AgentOpenCode {
 			t.Fatalf("unexpected problem %+v", p)
 		}
+	}
+}
+
+func TestProjectCodexSkillYesMemoryNo(t *testing.T) {
+	t.Parallel()
+	// codex-cli supports skills (tier 1) but not memory (manifesto 18): the skill
+	// installs, the memory is an explicit unsupported problem.
+	cfg := cfgWith(core.Selection{
+		SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
+		Agents: []core.AgentID{core.AgentCodexCLI},
+	})
+	res := Project(cfg, []Source{codingSource()}, agent.Default(), roots())
+	if len(res.Links) != 1 || res.Links[0].Target != "/home/u/.codex/skills/go-style" {
+		t.Fatalf("links = %+v, want only the codex skill under ~/.codex/skills", res.Links)
+	}
+	if len(res.Problems) != 1 || res.Problems[0].Kind != ProblemUnsupported || res.Problems[0].Component != "memory/style" {
+		t.Fatalf("want one unsupported problem for memory/style, got %+v", res.Problems)
 	}
 }
 

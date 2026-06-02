@@ -234,11 +234,15 @@ func NewSet(specs ...Spec) (Set, error) {
 // Only cells verified against an agent's real behavior are included; an
 // unverified or unsupported (agent, kind) is intentionally absent, so the
 // projection reports it as unsupported rather than installing to a guessed path
-// (manifesto 24, 25). Today claude-code is specified; the other installed agents
-// (codex-cli, copilot-cli) and the rest are pending vendor confirmation of their
-// skill and memory directories before they earn an entry here. It is built
-// through NewSet, so a mistake in the built-in data is a construction panic, not
-// a silently broken matrix.
+// (manifesto 24, 25). It is built through NewSet, so a mistake in the built-in
+// data is a construction panic, not a silently broken matrix.
+//
+// Skills (tier 1 auto-discovery: one directory per skill, each with a SKILL.md,
+// found by presence, manifesto 17, 22, 48) are specified for claude-code,
+// codex-cli, and copilot-cli. Memory is specified only for claude-code; codex
+// and copilot memory remain unsupported because each would need a SessionStart
+// hook, which botfile never does (manifesto 18, 25). opencode, copilot-vscode,
+// and pi.dev are pending vendor confirmation.
 func Default() Set {
 	set, err := NewSet(
 		Spec{
@@ -251,6 +255,25 @@ func Default() Set {
 				// claude-code reads <root>/rules/<name>.md as part of init; tier 1
 				// (manifesto 18, 22).
 				core.KindMemory: {Tier: Tier1, Segments: []string{"rules"}, Shape: LeafFile, Ext: ".md"},
+			},
+		},
+		Spec{
+			// codex-cli discovers personal skills under ~/.codex/skills/ (CODEX_HOME
+			// overrides ~/.codex), scanning the tree for SKILL.md by presence; tier 1.
+			ID:   core.AgentCodexCLI,
+			Base: Base{HomeRelative: []string{".codex"}, EnvOverride: "CODEX_HOME"},
+			Rules: map[core.Kind]InstallRule{
+				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
+			},
+		},
+		Spec{
+			// copilot-cli discovers personal skills under ~/.copilot/skills/, each a
+			// directory with SKILL.md, found automatically; tier 1. No documented
+			// home-override variable.
+			ID:   core.AgentCopilotCLI,
+			Base: Base{HomeRelative: []string{".copilot"}},
+			Rules: map[core.Kind]InstallRule{
+				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
 			},
 		},
 	)
