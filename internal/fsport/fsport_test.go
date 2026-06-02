@@ -2,6 +2,7 @@ package fsport
 
 import (
 	"errors"
+	"io/fs"
 	"path/filepath"
 	"testing"
 )
@@ -116,6 +117,27 @@ func runConformance(t *testing.T, nb newBackend) {
 		}
 	})
 
+	t.Run("readdir lists entries and errors on a missing dir", func(t *testing.T) {
+		fsys, base := nb(t)
+		dir := filepath.Join(base, "d")
+		if err := fsys.MkdirAll(dir); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := fsys.Symlink(filepath.Join(base, "x"), filepath.Join(dir, "link")); err != nil {
+			t.Fatalf("Symlink: %v", err)
+		}
+		names, err := fsys.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("ReadDir: %v", err)
+		}
+		if len(names) != 1 || names[0] != "link" {
+			t.Fatalf("ReadDir = %v, want [link]", names)
+		}
+		if _, err := fsys.ReadDir(filepath.Join(base, "missing")); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("ReadDir missing dir err = %v, want ErrNotExist", err)
+		}
+	})
+
 	t.Run("relative paths are rejected", func(t *testing.T) {
 		fsys, _ := nb(t)
 		rel := "relative/path"
@@ -130,6 +152,9 @@ func runConformance(t *testing.T, nb newBackend) {
 		}
 		if err := fsys.MkdirAll(rel); !errors.Is(err, ErrNotAbsolute) {
 			t.Errorf("MkdirAll rel err = %v, want ErrNotAbsolute", err)
+		}
+		if _, err := fsys.ReadDir(rel); !errors.Is(err, ErrNotAbsolute) {
+			t.Errorf("ReadDir rel err = %v, want ErrNotAbsolute", err)
 		}
 	})
 }

@@ -46,6 +46,10 @@ type FS interface {
 	// MkdirAll creates dir and any missing parents. It is a no-op if dir already
 	// exists as a directory, and errors if a path component exists as a non-dir.
 	MkdirAll(dir string) error
+	// ReadDir returns the names of the entries directly in dir (not recursive),
+	// sorted. It errors if dir does not exist or is not a directory; a missing
+	// dir is fs.ErrNotExist so callers can skip an unmaterialized namespace.
+	ReadDir(dir string) ([]string, error)
 }
 
 // OS is the real filesystem backend.
@@ -95,6 +99,22 @@ func (OS) MkdirAll(dir string) error {
 		return notAbs(dir)
 	}
 	return os.MkdirAll(dir, 0o755)
+}
+
+// ReadDir implements FS over os.ReadDir (which returns entries sorted by name).
+func (OS) ReadDir(dir string) ([]string, error) {
+	if !filepath.IsAbs(dir) {
+		return nil, notAbs(dir)
+	}
+	des, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(des))
+	for _, de := range des {
+		names = append(names, de.Name())
+	}
+	return names, nil
 }
 
 func notAbs(path string) error {

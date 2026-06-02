@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"sort"
 )
 
 // Mem is an in-memory FS for tests: a flat map of absolute paths to nodes. It
@@ -109,6 +110,25 @@ func (m *Mem) MkdirAll(dir string) error {
 		m.nodes[cur] = memNode{kind: memDir}
 	}
 	return nil
+}
+
+// ReadDir implements FS.
+func (m *Mem) ReadDir(dir string) ([]string, error) {
+	if !filepath.IsAbs(dir) {
+		return nil, notAbs(dir)
+	}
+	p := filepath.Clean(dir)
+	if !m.isDir(p) {
+		return nil, &fs.PathError{Op: "readdir", Path: p, Err: fs.ErrNotExist}
+	}
+	var names []string
+	for k := range m.nodes {
+		if k != p && filepath.Dir(k) == p {
+			names = append(names, filepath.Base(k))
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // isDir reports whether p is a directory: the filesystem root (where Dir(p)==p)
