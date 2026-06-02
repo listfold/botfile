@@ -73,9 +73,10 @@ func TestCodexAndCopilotSkillsOnly(t *testing.T) {
 		id       core.AgentID
 		wantRoot string
 	}{
-		// codex user skills live under the cross-agent ~/.agents root, not ~/.codex.
+		// Under shared-first, codex and copilot both install to the cross-agent
+		// ~/.agents root (copilot also reads ~/.copilot, but we prefer the shared one).
 		{core.AgentCodexCLI, "/home/u/.agents"},
-		{core.AgentCopilotCLI, "/home/u/.copilot"},
+		{core.AgentCopilotCLI, "/home/u/.agents"},
 	}
 	for _, tc := range cases {
 		ag, ok := Default().Lookup(tc.id)

@@ -272,11 +272,15 @@ func Default() Set {
 			},
 		},
 		Spec{
-			// copilot-cli discovers personal skills under ~/.copilot/skills/, each a
-			// directory with SKILL.md, found automatically; tier 1. No documented
+			// copilot-cli reads both ~/.copilot/skills and the cross-agent
+			// ~/.agents/skills. Under the shared-first policy botfile installs to the
+			// shared ~/.agents/skills (the same root codex uses), so one symlink
+			// serves every agent that reads it. Consequence: a skill here reaches the
+			// whole shared pool, so skill selection is coarse across it (see
+			// callouts/shared-skills-dir-and-selection.md). Tier 1. No documented
 			// home-override variable.
 			ID:   core.AgentCopilotCLI,
-			Base: Base{HomeRelative: []string{".copilot"}},
+			Base: Base{HomeRelative: []string{".agents"}},
 			Rules: map[core.Kind]InstallRule{
 				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
 			},
