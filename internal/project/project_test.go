@@ -168,6 +168,40 @@ func TestProjectSharedSkillNamespaceNotice(t *testing.T) {
 	}
 }
 
+func TestProjectNoticesCarrySelectionIdentity(t *testing.T) {
+	t.Parallel()
+	// Two copilot-only skill selections from the same source into the same shared
+	// namespace must produce two distinct, individually attributable notices, not
+	// two notices distinguishable only by slice position.
+	twoSkill := Source{
+		Name: "team", Root: "/src/team",
+		Plugins: []core.Plugin{{
+			Name: "coding",
+			Components: []core.Component{
+				{Kind: core.KindSkill, Name: "go-style"},
+				{Kind: core.KindSkill, Name: "deploy"},
+			},
+		}},
+	}
+	cfg := cfgWith(
+		core.Selection{SourceName: "team", PluginName: "coding", ComponentID: "skill/go-style", Agents: []core.AgentID{core.AgentCopilotCLI}},
+		core.Selection{SourceName: "team", PluginName: "coding", ComponentID: "skill/deploy", Agents: []core.AgentID{core.AgentCopilotCLI}},
+	)
+	res := Project(cfg, []Source{twoSkill}, agent.Default(), roots())
+	if len(res.Notices) != 2 {
+		t.Fatalf("want 2 notices, got %+v", res.Notices)
+	}
+	// Sorted by ComponentID tie-breaker: deploy before go-style.
+	if res.Notices[0].ComponentID != "skill/deploy" || res.Notices[1].ComponentID != "skill/go-style" {
+		t.Fatalf("notices not attributable by selection: %+v", res.Notices)
+	}
+	for _, n := range res.Notices {
+		if n.PluginName != "coding" {
+			t.Errorf("notice missing plugin identity: %+v", n)
+		}
+	}
+}
+
 func TestProjectWholePoolNoNotice(t *testing.T) {
 	t.Parallel()
 	// Naming the whole shared pool is not a surprise: no notice.

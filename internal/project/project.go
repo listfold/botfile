@@ -100,9 +100,14 @@ func (k NoticeKind) String() string {
 
 // Notice is a non-blocking projection outcome: the install happens, but its
 // effect is broader than the selection literally named, and the user is told so.
+// It carries the selection's selectors (PluginName, ComponentID) so a consumer
+// can point the user at the exact selection that caused the broader reach, and
+// can tell two notices apart without relying on slice position.
 type Notice struct {
 	Kind        NoticeKind
 	SourceName  string
+	PluginName  string         // the selection's plugin selector ("*" for all)
+	ComponentID string         // the selection's component selector ("*" for all)
 	Namespace   string         // the shared directory the skills install into
 	Selected    []core.AgentID // agents the selection named that share this namespace
 	AlsoReaches []core.AgentID // other agents that read the namespace and will also see the skills
@@ -277,7 +282,8 @@ func skillNotices(sel core.Selection, sourceName string, skillNS map[core.AgentI
 		sortAgents(selected)
 		sortAgents(surprise)
 		notices = append(notices, Notice{
-			Kind: NoticeSharedSkillNamespace, SourceName: sourceName, Namespace: dir,
+			Kind: NoticeSharedSkillNamespace, SourceName: sourceName,
+			PluginName: sel.PluginName, ComponentID: sel.ComponentID, Namespace: dir,
 			Selected: selected, AlsoReaches: surprise,
 			Detail: "skills scoped to these agents install into a shared directory other agents also read",
 		})
@@ -362,7 +368,13 @@ func sortResult(res *Result) {
 		if a.SourceName != b.SourceName {
 			return a.SourceName < b.SourceName
 		}
-		return a.Namespace < b.Namespace
+		if a.Namespace != b.Namespace {
+			return a.Namespace < b.Namespace
+		}
+		if a.PluginName != b.PluginName {
+			return a.PluginName < b.PluginName
+		}
+		return a.ComponentID < b.ComponentID
 	})
 }
 
