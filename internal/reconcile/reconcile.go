@@ -128,26 +128,44 @@ type Plan struct {
 // Reconcile computes the Plan that would make world match desired under opts.
 // It is pure and total: equal inputs always yield an equal Plan.
 func Reconcile(desired []LinkSpec, world World, opts Options) Plan {
+	rootByName := make(map[string]string, len(opts.Roots))
 	precedence := make(map[string]int, len(opts.Roots))
 	for i, r := range opts.Roots {
+		rootByName[r.Name] = filepath.Clean(r.Path)
 		precedence[r.Name] = i // lower index = higher precedence
 	}
 
-	// Resolve precedence: at each target, the desired link from the
-	// highest-precedence source wins the single slot; the rest are shadowed (35).
-	winners, shadowed := resolveWinners(desired, precedence)
-
 	var plan Plan
+
+	// Validate desired links before resolving winners: every link must point
+	// into the root of the source that contributed it. A link whose destination
+	// is outside its source root (a scanner or projection bug) becomes a conflict
+	// and is never created. This keeps the planner idempotent: it never creates a
+	// symlink that the next run would classify as unmanaged and report as a
+	// conflict (33).
+	valid := make([]LinkSpec, 0, len(desired))
+	for _, l := range desired {
+		root, ok := rootByName[l.SourceName]
+		if !ok || !underRoot(filepath.Clean(l.Dest), root) {
+			plan.Conflicts = append(plan.Conflicts, Conflict{
+				Target: l.Target, Dest: l.Dest, SourceName: l.SourceName,
+				Reason: "desired destination is not under the root of its source",
+			})
+			continue
+		}
+		valid = append(valid, l)
+	}
+
+	// Resolve precedence: at each target, the highest-precedence source wins the
+	// single slot and lower-precedence links are shadowed (35). Links sharing the
+	// highest precedence but disagreeing on destination are ambiguous and block
+	// the target rather than installing an arbitrary winner.
+	winners, shadowed, ambiguous := resolveWinners(valid, precedence)
 	plan.Shadowed = shadowed
+	plan.Conflicts = append(plan.Conflicts, ambiguous...)
 
 	// Targets that are desired: decide create / replace / no-op / conflict.
-	desiredTargets := make([]string, 0, len(winners))
-	for t := range winners {
-		desiredTargets = append(desiredTargets, t)
-	}
-	sort.Strings(desiredTargets)
-	for _, target := range desiredTargets {
-		want := winners[target]
+	for target, want := range winners {
 		entry := world.Entries[target]
 		switch entry.Kind {
 		case Absent:
@@ -174,15 +192,10 @@ func Reconcile(desired []LinkSpec, world World, opts Options) Plan {
 	}
 
 	// Targets that are observed but not desired: remove botfile's orphans only.
-	observedTargets := make([]string, 0, len(world.Entries))
-	for t := range world.Entries {
-		if _, isDesired := winners[t]; !isDesired {
-			observedTargets = append(observedTargets, t)
+	for target, entry := range world.Entries {
+		if _, isDesired := winners[target]; isDesired {
+			continue
 		}
-	}
-	sort.Strings(observedTargets)
-	for _, target := range observedTargets {
-		entry := world.Entries[target]
 		// Only a botfile-managed symlink is an orphan we remove; foreign entries
 		// and foreign symlinks are left untouched (33).
 		if entry.Kind == Symlink && opts.managed(entry.Dest) {
@@ -190,14 +203,44 @@ func Reconcile(desired []LinkSpec, world World, opts Options) Plan {
 		}
 	}
 
+	// Sort the whole plan once so output is deterministic regardless of the order
+	// ops and conflicts were discovered (creates/replaces before orphan removals).
+	sortOps(plan.Ops)
+	sortConflicts(plan.Conflicts)
 	return plan
 }
 
+// sortOps orders operations by target (then kind, though a target carries at
+// most one op) so a plan is reproducible.
+func sortOps(ops []Op) {
+	sort.Slice(ops, func(i, j int) bool {
+		if ops[i].Target != ops[j].Target {
+			return ops[i].Target < ops[j].Target
+		}
+		return ops[i].Kind < ops[j].Kind
+	})
+}
+
+// sortConflicts orders conflicts by target then source for reproducibility.
+func sortConflicts(cs []Conflict) {
+	sort.Slice(cs, func(i, j int) bool {
+		if cs[i].Target != cs[j].Target {
+			return cs[i].Target < cs[j].Target
+		}
+		return cs[i].SourceName < cs[j].SourceName
+	})
+}
+
 // resolveWinners groups desired links by target and picks the highest-precedence
-// source at each. Links that lose the tie are returned as shadows (35). A source
+// source at each. Lower-precedence links are returned as shadows (35). A source
 // not present in the precedence map sorts after all known sources, so an unknown
 // source can never silently outrank a declared one.
-func resolveWinners(desired []LinkSpec, precedence map[string]int) (map[string]LinkSpec, []Shadow) {
+//
+// Two safeguards keep an ambiguous source layout from silently installing an
+// arbitrary link: exact duplicates (same source and destination) collapse to
+// one, and links that share the highest precedence at a target but disagree on
+// destination block the target with a conflict instead of choosing by spelling.
+func resolveWinners(desired []LinkSpec, precedence map[string]int) (map[string]LinkSpec, []Shadow, []Conflict) {
 	rank := func(name string) int {
 		if i, ok := precedence[name]; ok {
 			return i
@@ -212,27 +255,56 @@ func resolveWinners(desired []LinkSpec, precedence map[string]int) (map[string]L
 
 	winners := make(map[string]LinkSpec, len(byTarget))
 	var shadowed []Shadow
+	var ambiguous []Conflict
 	for target, links := range byTarget {
-		// Stable order: precedence first, then source name, then dest, so ties
-		// among equal-precedence sources resolve deterministically.
-		sort.Slice(links, func(i, j int) bool {
-			ri, rj := rank(links[i].SourceName), rank(links[j].SourceName)
+		// Collapse exact duplicates (same source and destination): a link
+		// declared twice contributes nothing and is not a precedence override.
+		type srcDest struct{ source, dest string }
+		seen := make(map[srcDest]bool, len(links))
+		uniq := make([]LinkSpec, 0, len(links))
+		for _, l := range links {
+			k := srcDest{l.SourceName, filepath.Clean(l.Dest)}
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			uniq = append(uniq, l)
+		}
+
+		// Stable order: precedence first, then source name, then dest, so the
+		// winner and shadow ordering are deterministic.
+		sort.Slice(uniq, func(i, j int) bool {
+			ri, rj := rank(uniq[i].SourceName), rank(uniq[j].SourceName)
 			if ri != rj {
 				return ri < rj
 			}
-			if links[i].SourceName != links[j].SourceName {
-				return links[i].SourceName < links[j].SourceName
+			if uniq[i].SourceName != uniq[j].SourceName {
+				return uniq[i].SourceName < uniq[j].SourceName
 			}
-			return links[i].Dest < links[j].Dest
+			return uniq[i].Dest < uniq[j].Dest
 		})
-		win := links[0]
-		winners[target] = win
-		for _, lost := range links[1:] {
-			// A duplicate of the exact same link (same source and dest) is not a
-			// shadow; it contributes nothing and nothing was overridden.
-			if lost.SourceName == win.SourceName && sameLink(lost.Dest, win.Dest) {
-				continue
+
+		// If the links sharing the top precedence disagree on destination, the
+		// target is ambiguous (for example one source contributing two different
+		// destinations to the same path): block it rather than guess (35).
+		topRank := rank(uniq[0].SourceName)
+		topDests := make(map[string]bool)
+		for _, l := range uniq {
+			if rank(l.SourceName) == topRank {
+				topDests[filepath.Clean(l.Dest)] = true
 			}
+		}
+		if len(topDests) > 1 {
+			ambiguous = append(ambiguous, Conflict{
+				Target: target, Dest: uniq[0].Dest, SourceName: uniq[0].SourceName,
+				Reason: "the highest-precedence source contributes more than one destination to this path",
+			})
+			continue
+		}
+
+		win := uniq[0]
+		winners[target] = win
+		for _, lost := range uniq[1:] {
 			shadowed = append(shadowed, Shadow{
 				Target: target, Dest: lost.Dest, SourceName: lost.SourceName, WonBy: win.SourceName,
 			})
@@ -245,7 +317,7 @@ func resolveWinners(desired []LinkSpec, precedence map[string]int) (map[string]L
 		}
 		return shadowed[i].SourceName < shadowed[j].SourceName
 	})
-	return winners, shadowed
+	return winners, shadowed, ambiguous
 }
 
 // managed reports whether dest lies under one of the source roots, which is how

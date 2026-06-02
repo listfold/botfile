@@ -155,6 +155,72 @@ func TestDeterministicOrdering(t *testing.T) {
 	}
 }
 
+func TestDestOutsideRootIsConflictNotCreate(t *testing.T) {
+	t.Parallel()
+	// A desired link whose destination is not under its source root is a planner
+	// input bug; it must become a conflict, never a create that the next run
+	// would see as foreign (manifesto 33).
+	desired := []LinkSpec{{Target: "/t/go", Dest: "/elsewhere/go", SourceName: "team"}}
+	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
+	if len(plan.Ops) != 0 {
+		t.Fatalf("out-of-root dest must not create, got ops %+v", plan.Ops)
+	}
+	if len(plan.Conflicts) != 1 || plan.Conflicts[0].Target != "/t/go" {
+		t.Fatalf("expected one conflict at /t/go, got %+v", plan.Conflicts)
+	}
+}
+
+func TestUnknownSourceLinkIsConflict(t *testing.T) {
+	t.Parallel()
+	// A link from a source with no configured root cannot be classified as
+	// managed, so it is rejected rather than created.
+	desired := []LinkSpec{{Target: "/t/go", Dest: "/src/ghost/go", SourceName: "ghost"}}
+	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
+	if len(plan.Ops) != 0 || len(plan.Conflicts) != 1 {
+		t.Fatalf("unknown-source link must be a conflict with no ops, got ops=%+v conflicts=%+v", plan.Ops, plan.Conflicts)
+	}
+}
+
+func TestSameSourceDifferentDestIsConflict(t *testing.T) {
+	t.Parallel()
+	// One source contributing two different destinations to the same target is
+	// ambiguous: block the target instead of picking one by spelling (35).
+	desired := []LinkSpec{
+		{Target: "/t/go", Dest: "/src/team/a/skill/go", SourceName: "team"},
+		{Target: "/t/go", Dest: "/src/team/b/skill/go", SourceName: "team"},
+	}
+	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
+	if len(plan.Ops) != 0 {
+		t.Fatalf("ambiguous same-source target must not install, got ops %+v", plan.Ops)
+	}
+	if len(plan.Conflicts) != 1 || plan.Conflicts[0].Target != "/t/go" {
+		t.Fatalf("expected one conflict at /t/go, got %+v", plan.Conflicts)
+	}
+	if len(plan.Shadowed) != 0 {
+		t.Fatalf("a blocked target must not also shadow, got %+v", plan.Shadowed)
+	}
+}
+
+func TestGlobalOpOrderingAcrossCreateAndRemove(t *testing.T) {
+	t.Parallel()
+	// A create for a high target plus an orphan removal for a low target must
+	// come back globally sorted by target, not in discovery order.
+	desired := []LinkSpec{{Target: "/t/z", Dest: "/src/team/p/skill/z", SourceName: "team"}}
+	world := World{Entries: map[string]Entry{
+		"/t/a": {Kind: Symlink, Dest: "/src/team/p/skill/a"}, // orphan, gets removed
+	}}
+	plan := Reconcile(desired, world, opts())
+	if len(plan.Ops) != 2 {
+		t.Fatalf("expected 2 ops, got %+v", plan.Ops)
+	}
+	if plan.Ops[0].Target != "/t/a" || plan.Ops[0].Kind != OpRemove {
+		t.Errorf("first op = %+v, want remove /t/a", plan.Ops[0])
+	}
+	if plan.Ops[1].Target != "/t/z" || plan.Ops[1].Kind != OpCreate {
+		t.Errorf("second op = %+v, want create /t/z", plan.Ops[1])
+	}
+}
+
 func TestUnderRootSegmentBoundary(t *testing.T) {
 	t.Parallel()
 	// A symlink into "/src/team-archive" must not count as managed by root
