@@ -37,8 +37,9 @@ type FS interface {
 	// Lstat reports the entry at path without following a final symlink. A
 	// missing path yields Entry{Exists: false} and a nil error.
 	Lstat(path string) (Entry, error)
-	// Symlink creates a symlink at link pointing to dest. It errors if link
-	// already exists or its parent directory does not.
+	// Symlink creates a symlink at link pointing to dest. Both link and dest must
+	// be absolute. It errors if link already exists or its parent directory does
+	// not.
 	Symlink(dest, link string) error
 	// Remove removes the symlink (or empty directory) at path. It errors if path
 	// does not exist.
@@ -77,10 +78,15 @@ func (OS) Lstat(path string) (Entry, error) {
 	return Entry{Exists: true}, nil
 }
 
-// Symlink implements FS over os.Symlink.
+// Symlink implements FS over os.Symlink. Both the link and its destination must
+// be absolute: botfile normalizes every desired destination to an absolute path
+// before planning, so a relative dest here is a malformed op, not a feature.
 func (OS) Symlink(dest, link string) error {
 	if !filepath.IsAbs(link) {
 		return notAbs(link)
+	}
+	if !filepath.IsAbs(dest) {
+		return notAbs(dest)
 	}
 	return os.Symlink(dest, link)
 }

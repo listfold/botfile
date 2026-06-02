@@ -81,6 +81,13 @@ func runConformance(t *testing.T, nb newBackend) {
 		}
 	})
 
+	t.Run("symlink with a relative destination is rejected", func(t *testing.T) {
+		fsys, base := nb(t)
+		if err := fsys.Symlink("relative/dest", filepath.Join(base, "link")); !errors.Is(err, ErrNotAbsolute) {
+			t.Fatalf("Symlink rel dest err = %v, want ErrNotAbsolute", err)
+		}
+	})
+
 	t.Run("symlink into a missing dir errors until created", func(t *testing.T) {
 		fsys, base := nb(t)
 		link := filepath.Join(base, "missing", "link")

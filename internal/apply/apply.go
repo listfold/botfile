@@ -5,10 +5,16 @@
 // reader.
 //
 // Apply is a saga: each operation records a compensating undo, and the first
-// failure rolls the whole batch back, so a run is all-or-nothing. It honors
-// manifesto 33 by refusing to remove or replace anything that is not a symlink,
-// so it never clobbers a file botfile does not own, even if the world drifted
-// since the plan was computed.
+// failure rolls the whole batch back, so a run is all-or-nothing.
+//
+// It is a faithful interpreter, not a repairer: a destructive op (replace,
+// remove) is applied only while its precondition still holds, namely that the
+// target is a symlink whose destination still equals the plan's observed
+// OldDest. If the world drifted (the target vanished, became a non-symlink, or
+// now points elsewhere), Apply reports a drift error and leaves the path
+// untouched, so the runtime re-plans rather than mutating stale state. This is
+// how it honors manifesto 33: botfile only ever removes or replaces the exact
+// symlink it created.
 package apply
 
 import (
@@ -81,37 +87,28 @@ func applyReplace(fsys fsport.FS, op reconcile.Op) (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	if entry.Exists && !entry.IsSymlink {
-		return nil, fmt.Errorf("refusing to replace non-symlink at %s (botfile owns only symlinks)", op.Target)
+	// Precondition: the exact managed symlink the planner saw must still be here.
+	switch {
+	case !entry.Exists:
+		return nil, fmt.Errorf("replace %s: drifted, expected a botfile symlink to %s but the path is absent; re-plan", op.Target, op.OldDest)
+	case !entry.IsSymlink:
+		return nil, fmt.Errorf("replace %s: refusing to replace a non-symlink (botfile owns only symlinks)", op.Target)
+	case !sameDest(entry.Dest, op.OldDest):
+		return nil, fmt.Errorf("replace %s: drifted, points to %s but the plan expected %s; re-plan", op.Target, entry.Dest, op.OldDest)
 	}
 
-	hadOld := entry.Exists
-	oldDest := entry.Dest
-	if hadOld {
-		if err := fsys.Remove(op.Target); err != nil {
-			return nil, err
-		}
-	} else if err := fsys.MkdirAll(filepath.Dir(op.Target)); err != nil {
-		// The managed symlink vanished since planning; treat as a create.
+	if err := fsys.Remove(op.Target); err != nil {
 		return nil, err
 	}
-
 	if err := fsys.Symlink(op.Dest, op.Target); err != nil {
-		// Best-effort restore of the prior symlink before reporting.
-		if hadOld {
-			_ = fsys.Symlink(oldDest, op.Target)
-		}
+		_ = fsys.Symlink(op.OldDest, op.Target) // best-effort restore of the prior symlink
 		return nil, err
 	}
-
 	return func() error {
 		if err := fsys.Remove(op.Target); err != nil {
 			return err
 		}
-		if hadOld {
-			return fsys.Symlink(oldDest, op.Target)
-		}
-		return nil
+		return fsys.Symlink(op.OldDest, op.Target)
 	}, nil
 }
 
@@ -120,16 +117,23 @@ func applyRemove(fsys fsport.FS, op reconcile.Op) (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !entry.Exists {
-		// Already gone: the desired state holds, nothing to undo.
+	switch {
+	case !entry.Exists:
+		// Already gone: the desired end state holds, nothing to do or undo.
 		return func() error { return nil }, nil
+	case !entry.IsSymlink:
+		return nil, fmt.Errorf("remove %s: refusing to remove a non-symlink (botfile owns only symlinks)", op.Target)
+	case !sameDest(entry.Dest, op.OldDest):
+		return nil, fmt.Errorf("remove %s: drifted, points to %s but the plan expected %s; re-plan", op.Target, entry.Dest, op.OldDest)
 	}
-	if !entry.IsSymlink {
-		return nil, fmt.Errorf("refusing to remove non-symlink at %s (botfile owns only symlinks)", op.Target)
-	}
-	oldDest := entry.Dest
 	if err := fsys.Remove(op.Target); err != nil {
 		return nil, err
 	}
-	return func() error { return fsys.Symlink(oldDest, op.Target) }, nil
+	return func() error { return fsys.Symlink(op.OldDest, op.Target) }, nil
+}
+
+// sameDest compares two symlink destinations with the same cleaned-path
+// semantics reconcile uses, so an equivalent spelling is not mistaken for drift.
+func sameDest(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
 }

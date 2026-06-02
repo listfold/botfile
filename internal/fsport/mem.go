@@ -59,6 +59,9 @@ func (m *Mem) Symlink(dest, link string) error {
 	if !filepath.IsAbs(link) {
 		return notAbs(link)
 	}
+	if !filepath.IsAbs(dest) {
+		return notAbs(dest)
+	}
 	p := filepath.Clean(link)
 	if _, ok := m.nodes[p]; ok {
 		return &fs.PathError{Op: "symlink", Path: p, Err: fs.ErrExist}

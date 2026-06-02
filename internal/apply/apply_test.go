@@ -94,6 +94,37 @@ func TestApplyRefusesNonSymlink(t *testing.T) {
 	}
 }
 
+func TestApplyReplaceRefusesDrift(t *testing.T) {
+	t.Parallel()
+	fsys := fsport.NewMem()
+	// A managed symlink that now points somewhere other than the plan's OldDest
+	// (the world drifted, e.g. the user re-pointed it).
+	if err := Apply(fsys, []reconcile.Op{{Kind: reconcile.OpCreate, Target: "/t/go", Dest: "/src/current/go"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ops := []reconcile.Op{
+		{Kind: reconcile.OpReplace, Target: "/t/go", Dest: "/src/new/go", OldDest: "/src/STALE/go"},
+	}
+	if err := Apply(fsys, ops); err == nil {
+		t.Fatal("replace must refuse a symlink whose dest differs from the plan's OldDest")
+	}
+	// Untouched: still the current symlink, not the new one.
+	mustSymlink(t, fsys, "/t/go", "/src/current/go")
+}
+
+func TestApplyRemoveRefusesDrift(t *testing.T) {
+	t.Parallel()
+	fsys := fsport.NewMem()
+	if err := Apply(fsys, []reconcile.Op{{Kind: reconcile.OpCreate, Target: "/t/go", Dest: "/src/current/go"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ops := []reconcile.Op{{Kind: reconcile.OpRemove, Target: "/t/go", OldDest: "/src/STALE/go"}}
+	if err := Apply(fsys, ops); err == nil {
+		t.Fatal("remove must refuse a symlink whose dest differs from the plan's OldDest")
+	}
+	mustSymlink(t, fsys, "/t/go", "/src/current/go")
+}
+
 func TestApplyRollsBackOnFailure(t *testing.T) {
 	t.Parallel()
 	fsys := fsport.NewMem()
