@@ -143,6 +143,20 @@ const (
 	OpRemove
 )
 
+// String renders an OpKind as a stable, human-readable token.
+func (k OpKind) String() string {
+	switch k {
+	case OpCreate:
+		return "create"
+	case OpReplace:
+		return "replace"
+	case OpRemove:
+		return "remove"
+	default:
+		return "unknown-op"
+	}
+}
+
 // Op is a single planned filesystem operation. The applier turns it into a real
 // symlink mutation; the undo stack uses OldDest to reverse it.
 type Op struct {
