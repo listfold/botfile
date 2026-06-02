@@ -189,6 +189,66 @@ func TestSameSourceDifferentDestIsAmbiguousProblem(t *testing.T) {
 	}
 }
 
+func TestLowerPrecedenceAmbiguityIsProblemNotShadow(t *testing.T) {
+	t.Parallel()
+	// team wins /t/go, but lower-precedence personal contributes two different
+	// destinations to /t/go. personal's ambiguity must surface as a Problem, not
+	// be hidden as two valid Shadows behind the winner (review ba62d1d).
+	desired := []LinkSpec{
+		{Target: "/t/go", Dest: "/src/team/p/skills/go", SourceName: "team"},
+		{Target: "/t/go", Dest: "/src/personal/a/skills/go", SourceName: "personal"},
+		{Target: "/t/go", Dest: "/src/personal/b/skills/go", SourceName: "personal"},
+	}
+	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
+	want := []Op{{Kind: OpCreate, Target: "/t/go", Dest: "/src/team/p/skills/go"}}
+	if !reflect.DeepEqual(plan.Ops, want) {
+		t.Fatalf("ops = %+v, want team winner create", plan.Ops)
+	}
+	if len(plan.Shadows) != 0 {
+		t.Fatalf("ambiguous lower-precedence source must not shadow, got %+v", plan.Shadows)
+	}
+	if len(plan.Problems) != 1 || plan.Problems[0].Kind != ProblemAmbiguousTarget || plan.Problems[0].SourceName != "personal" {
+		t.Fatalf("expected one ambiguous-target Problem for personal, got %+v", plan.Problems)
+	}
+}
+
+func TestNonAbsolutePathsAreProblems(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		spec    LinkSpec
+		options Options
+	}{
+		{"relative target", LinkSpec{Target: "rel/go", Dest: "/src/team/p/skills/go", SourceName: "team"}, opts()},
+		{"relative dest", LinkSpec{Target: "/t/go", Dest: "src/team/p/skills/go", SourceName: "team"}, opts()},
+		{"relative root", LinkSpec{Target: "/t/go", Dest: "/abs/x", SourceName: "team"}, Options{Roots: []Root{{Name: "team", Path: "rel/team"}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			plan := Reconcile([]LinkSpec{tc.spec}, World{Entries: map[string]Entry{}}, tc.options)
+			if len(plan.Ops) != 0 {
+				t.Fatalf("%s must not create, got %+v", tc.name, plan.Ops)
+			}
+			if len(plan.Problems) != 1 || plan.Problems[0].Kind != ProblemInvalidPath {
+				t.Fatalf("%s: expected one ProblemInvalidPath, got %+v", tc.name, plan.Problems)
+			}
+		})
+	}
+}
+
+func TestUncleanPathsAreCanonicalized(t *testing.T) {
+	t.Parallel()
+	// Equivalent unclean spellings must produce the same operation payload, so a
+	// plan does not depend on how a scanner happened to spell a path.
+	desired := []LinkSpec{{Target: "/t/./go", Dest: "/src/team/p/./skills/go", SourceName: "team"}}
+	plan := Reconcile(desired, World{Entries: map[string]Entry{}}, opts())
+	want := []Op{{Kind: OpCreate, Target: "/t/go", Dest: "/src/team/p/skills/go"}}
+	if !reflect.DeepEqual(plan.Ops, want) {
+		t.Fatalf("ops = %+v, want canonicalized create %+v", plan.Ops, want)
+	}
+}
+
 func TestLocalizedProblemStillPlansRest(t *testing.T) {
 	t.Parallel()
 	// A Problem on one target must not suppress a clean plan for another: the

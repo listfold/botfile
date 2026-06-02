@@ -97,14 +97,36 @@ type DesiredLink struct {
 }
 
 // newDesiredLink is the single gate that turns a raw target/dest plus a known
-// source root into a validated DesiredLink. It fails (ok == false) when the
-// destination does not lie under the source root, which is the only way an
-// invalid dest is kept out of the core.
-func newDesiredLink(target, dest string, source Root, rank int) (DesiredLink, bool) {
-	if !underRoot(filepath.Clean(dest), filepath.Clean(source.Path)) {
-		return DesiredLink{}, false
+// source root into a validated, normalized DesiredLink. It both normalizes
+// (cleans every path so equivalent spellings collapse to one operation payload)
+// and validates (target, dest, and root must be absolute; dest must lie under
+// the root). On failure it returns the ProblemKind that classifies why, so a
+// bad link is kept out of the core as the right kind of Problem rather than
+// silently coerced.
+func newDesiredLink(target, dest string, source Root, rank int) (DesiredLink, ProblemKind, bool) {
+	ct := filepath.Clean(target)
+	cd := filepath.Clean(dest)
+	cr := filepath.Clean(source.Path)
+	if !filepath.IsAbs(ct) || !filepath.IsAbs(cd) || !filepath.IsAbs(cr) {
+		return DesiredLink{}, ProblemInvalidPath, false
 	}
-	return DesiredLink{Target: target, Dest: dest, Source: source, rank: rank}, true
+	if !underRoot(cd, cr) {
+		return DesiredLink{}, ProblemDestOutsideRoot, false
+	}
+	return DesiredLink{Target: ct, Dest: cd, Source: Root{Name: source.Name, Path: cr}, rank: rank}, 0, true
+}
+
+// pathProblemDetail returns the human-readable detail for a path-classification
+// Problem produced by newDesiredLink.
+func pathProblemDetail(k ProblemKind) string {
+	switch k {
+	case ProblemInvalidPath:
+		return "target, destination, and source root must all be absolute paths"
+	case ProblemDestOutsideRoot:
+		return "destination is not under the root of its source"
+	default:
+		return "invalid desired link"
+	}
 }
 
 // OpKind is the kind of filesystem operation a Plan prescribes.
@@ -159,10 +181,13 @@ type ProblemKind int
 const (
 	// ProblemUnknownSource: a link names a source with no configured root.
 	ProblemUnknownSource ProblemKind = iota
+	// ProblemInvalidPath: a link's target, destination, or source root is not an
+	// absolute path, so it cannot be normalized into a well-defined operation.
+	ProblemInvalidPath
 	// ProblemDestOutsideRoot: a link's destination is not under its source root.
 	ProblemDestOutsideRoot
-	// ProblemAmbiguousTarget: the highest-precedence source at a target offers
-	// more than one destination, so precedence cannot pick a single winner.
+	// ProblemAmbiguousTarget: a source contributes more than one destination to a
+	// single target, so precedence cannot pick a single winner for that source.
 	ProblemAmbiguousTarget
 )
 
@@ -171,6 +196,8 @@ func (k ProblemKind) String() string {
 	switch k {
 	case ProblemUnknownSource:
 		return "unknown-source"
+	case ProblemInvalidPath:
+		return "invalid-path"
 	case ProblemDestOutsideRoot:
 		return "dest-outside-root"
 	case ProblemAmbiguousTarget:
@@ -246,11 +273,11 @@ func prepare(raw []LinkSpec, opts Options) ([]DesiredLink, []Problem) {
 			})
 			continue
 		}
-		dl, ok := newDesiredLink(l.Target, l.Dest, r, rank[l.SourceName])
+		dl, probKind, ok := newDesiredLink(l.Target, l.Dest, r, rank[l.SourceName])
 		if !ok {
 			problems = append(problems, Problem{
-				Kind: ProblemDestOutsideRoot, Target: l.Target, Dest: l.Dest, SourceName: l.SourceName,
-				Detail: "destination is not under the root of its source",
+				Kind: probKind, Target: l.Target, Dest: l.Dest, SourceName: l.SourceName,
+				Detail: pathProblemDetail(probKind),
 			})
 			continue
 		}
@@ -278,38 +305,44 @@ func resolve(links []DesiredLink) (map[string]DesiredLink, []Shadow, []Problem) 
 	for target, group := range byTarget {
 		uniq := dedupLinks(group)
 
-		// Stable order: precedence first, then source name, then dest, so the
-		// winner and the shadow ordering are deterministic.
-		sort.Slice(uniq, func(i, j int) bool {
-			if uniq[i].rank != uniq[j].rank {
-				return uniq[i].rank < uniq[j].rank
-			}
-			if uniq[i].Source.Name != uniq[j].Source.Name {
-				return uniq[i].Source.Name < uniq[j].Source.Name
-			}
-			return uniq[i].Dest < uniq[j].Dest
-		})
-
-		// If the links sharing the top precedence disagree on destination, the
-		// target is ambiguous: report a Problem and install nothing here (35).
-		topRank := uniq[0].rank
-		topDests := make(map[string]bool)
+		// Group the target's links by source. A source contributing more than one
+		// distinct destination to a single target is an ambiguous desired model
+		// regardless of whether that source would win precedence: classify it as
+		// a Problem and exclude its links entirely, before winner and shadow
+		// semantics could erase it (reviews/patterns.md: classify ambiguity before
+		// precedence hides it). Each source has distinct dests already, since
+		// dedupLinks collapses exact duplicates, so len > 1 means disagreement.
+		bySource := make(map[string][]DesiredLink)
 		for _, l := range uniq {
-			if l.rank == topRank {
-				topDests[filepath.Clean(l.Dest)] = true
-			}
+			bySource[l.Source.Name] = append(bySource[l.Source.Name], l)
 		}
-		if len(topDests) > 1 {
-			problems = append(problems, Problem{
-				Kind: ProblemAmbiguousTarget, Target: target, Dest: uniq[0].Dest, SourceName: uniq[0].Source.Name,
-				Detail: "the highest-precedence source contributes more than one destination to this path",
-			})
+
+		var candidates []DesiredLink // one representative per unambiguous source
+		for name, links := range bySource {
+			if len(links) > 1 {
+				problems = append(problems, Problem{
+					Kind: ProblemAmbiguousTarget, Target: target, Dest: links[0].Dest, SourceName: name,
+					Detail: "this source contributes more than one destination to this path",
+				})
+				continue
+			}
+			candidates = append(candidates, links[0])
+		}
+		if len(candidates) == 0 {
 			continue
 		}
 
-		win := uniq[0]
+		// Highest precedence (lowest rank) wins the single slot; the remaining
+		// unambiguous sources are shadowed (manifesto 35).
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].rank != candidates[j].rank {
+				return candidates[i].rank < candidates[j].rank
+			}
+			return candidates[i].Source.Name < candidates[j].Source.Name
+		})
+		win := candidates[0]
 		winners[target] = win
-		for _, lost := range uniq[1:] {
+		for _, lost := range candidates[1:] {
 			shadows = append(shadows, Shadow{
 				Target: target, Dest: lost.Dest, SourceName: lost.Source.Name, WonBy: win.Source.Name,
 			})
