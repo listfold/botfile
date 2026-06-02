@@ -44,6 +44,10 @@ const (
 	// ProblemUnsupported: a targeted agent has no vendor spec for the component's
 	// kind, so botfile cannot install it (manifesto 24, 25).
 	ProblemUnsupported
+	// ProblemNoLayout: the source grammar has no directory mapping for a
+	// component's kind, so its source destination cannot be built. This guards
+	// against a matrix supporting a kind the source layout cannot represent.
+	ProblemNoLayout
 )
 
 // String renders a ProblemKind as a stable, human-readable token.
@@ -55,6 +59,8 @@ func (k ProblemKind) String() string {
 		return "empty-selection"
 	case ProblemUnsupported:
 		return "unsupported"
+	case ProblemNoLayout:
+		return "no-layout"
 	default:
 		return "unknown-problem"
 	}
@@ -79,8 +85,10 @@ type Result struct {
 }
 
 // Project maps cfg's selections over the scanned sources and the agent matrix,
-// producing desired links plus problems. It is pure: home is passed in.
-func Project(cfg core.Config, sources []Source, agents agent.Set, home string) Result {
+// producing desired links plus problems. It is pure: the agents' config roots
+// are resolved by the caller (agent.Set.ResolveRoots) and passed in as roots, so
+// projection never reads the environment.
+func Project(cfg core.Config, sources []Source, agents agent.Set, roots map[core.AgentID]string) Result {
 	byName := make(map[string]Source, len(sources))
 	for _, s := range sources {
 		byName[s.Name] = s
@@ -117,7 +125,16 @@ func Project(cfg core.Config, sources []Source, agents agent.Set, home string) R
 					})
 					continue
 				}
-				target, supported := ag.Target(home, m.comp.Kind, m.comp.Name)
+				root, ok := roots[agentID]
+				if !ok || root == "" {
+					res.Problems = append(res.Problems, Problem{
+						Kind: ProblemUnsupported, SourceName: src.Name, Agent: agentID,
+						Component: m.comp.Ref().String(),
+						Detail:    "no resolved config root for agent",
+					})
+					continue
+				}
+				target, supported := ag.Target(root, m.comp.Kind, m.comp.Name)
 				if !supported {
 					res.Problems = append(res.Problems, Problem{
 						Kind: ProblemUnsupported, SourceName: src.Name, Agent: agentID,
@@ -126,9 +143,18 @@ func Project(cfg core.Config, sources []Source, agents agent.Set, home string) R
 					})
 					continue
 				}
+				dest, ok := destPath(src.Root, m.plugin, m.comp)
+				if !ok {
+					res.Problems = append(res.Problems, Problem{
+						Kind: ProblemNoLayout, SourceName: src.Name, Agent: agentID,
+						Component: m.comp.Ref().String(),
+						Detail:    "source grammar has no directory for this component kind",
+					})
+					continue
+				}
 				res.Links = append(res.Links, reconcile.LinkSpec{
 					Target:     target,
-					Dest:       destPath(src.Root, m.plugin, m.comp),
+					Dest:       dest,
 					SourceName: src.Name,
 				})
 			}
@@ -177,10 +203,14 @@ func componentMatches(sel core.Selection, c core.Component) bool {
 }
 
 // destPath builds a component's absolute path inside its source from the source
-// grammar: <root>/<plugin>/<kindDir>/<leaf> (manifesto 46-48).
-func destPath(root, plugin string, c core.Component) string {
-	dir, _ := source.DirForKind(c.Kind)
-	return filepath.Join(root, plugin, dir, source.ComponentLeaf(c))
+// grammar: <root>/<plugin>/<kindDir>/<leaf> (manifesto 46-48). It returns false
+// when the source layout has no directory for the component's kind.
+func destPath(sourceRoot, plugin string, c core.Component) (string, bool) {
+	dir, ok := source.DirForKind(c.Kind)
+	if !ok {
+		return "", false
+	}
+	return filepath.Join(sourceRoot, plugin, dir, source.ComponentLeaf(c)), true
 }
 
 // sortResult orders links and problems deterministically.
