@@ -110,6 +110,22 @@ func (a Agent) Root(home string, getenv func(string) string) string {
 	return filepath.Join(parts...)
 }
 
+// Namespace returns the absolute directory under root where the agent installs
+// components of kind (the per-kind directory, without a component leaf), and
+// whether the agent supports that kind. Two agents whose Namespace for a kind is
+// the same directory share visibility of everything installed there: that is how
+// the projection detects a shared skills pool (manifesto 35, 49).
+func (a Agent) Namespace(root string, kind core.Kind) (string, bool) {
+	rule, ok := a.rules[kind]
+	if !ok {
+		return "", false
+	}
+	parts := make([]string, 0, len(rule.Segments)+1)
+	parts = append(parts, root)
+	parts = append(parts, rule.Segments...)
+	return filepath.Join(parts...), true
+}
+
 // Target returns the absolute install path for a component of kind/name given
 // the agent's already-resolved config root, and whether the agent supports that
 // kind. The path is the kind's native per-kind directory under root plus the

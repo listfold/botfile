@@ -140,6 +140,61 @@ func TestProjectUnknownSourceIsProblem(t *testing.T) {
 	}
 }
 
+func TestProjectSharedSkillNamespaceNotice(t *testing.T) {
+	t.Parallel()
+	// Scoping a skill to copilot-cli alone still installs it into the shared
+	// ~/.agents/skills, which codex-cli reads. The projection must say so
+	// (manifesto 49), so the user is not misled into thinking codex is excluded.
+	cfg := cfgWith(core.Selection{
+		SourceName: "team", PluginName: core.Wildcard, ComponentID: "skill/go-style",
+		Agents: []core.AgentID{core.AgentCopilotCLI},
+	})
+	res := Project(cfg, []Source{codingSource()}, agent.Default(), roots())
+	if len(res.Links) != 1 || res.Links[0].Target != "/home/u/.agents/skills/go-style" {
+		t.Fatalf("links = %+v, want the shared skill install", res.Links)
+	}
+	if len(res.Notices) != 1 {
+		t.Fatalf("want one shared-skill-namespace notice, got %+v", res.Notices)
+	}
+	n := res.Notices[0]
+	if n.Kind != NoticeSharedSkillNamespace || n.Namespace != "/home/u/.agents/skills" {
+		t.Fatalf("notice = %+v, want shared-skill-namespace at /home/u/.agents/skills", n)
+	}
+	if len(n.Selected) != 1 || n.Selected[0] != core.AgentCopilotCLI {
+		t.Errorf("notice.Selected = %v, want [copilot-cli]", n.Selected)
+	}
+	if len(n.AlsoReaches) != 1 || n.AlsoReaches[0] != core.AgentCodexCLI {
+		t.Errorf("notice.AlsoReaches = %v, want [codex-cli]", n.AlsoReaches)
+	}
+}
+
+func TestProjectWholePoolNoNotice(t *testing.T) {
+	t.Parallel()
+	// Naming the whole shared pool is not a surprise: no notice.
+	cfg := cfgWith(core.Selection{
+		SourceName: "team", PluginName: core.Wildcard, ComponentID: "skill/go-style",
+		Agents: []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI},
+	})
+	res := Project(cfg, []Source{codingSource()}, agent.Default(), roots())
+	if len(res.Notices) != 0 {
+		t.Fatalf("naming the whole pool must not notice, got %+v", res.Notices)
+	}
+}
+
+func TestProjectIsolatedAgentNoNotice(t *testing.T) {
+	t.Parallel()
+	// claude-code's skills dir is isolated, so a claude-only skill selection has
+	// no shared-namespace surprise.
+	cfg := cfgWith(core.Selection{
+		SourceName: "team", PluginName: core.Wildcard, ComponentID: "skill/go-style",
+		Agents: []core.AgentID{core.AgentClaudeCode},
+	})
+	res := Project(cfg, []Source{codingSource()}, agent.Default(), roots())
+	if len(res.Notices) != 0 {
+		t.Fatalf("isolated agent must not notice, got %+v", res.Notices)
+	}
+}
+
 func TestProjectPluginFilter(t *testing.T) {
 	t.Parallel()
 	// A named plugin that does not exist matches nothing.

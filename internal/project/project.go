@@ -76,12 +76,47 @@ type Problem struct {
 	Detail     string
 }
 
-// Result is the projection output: the desired links for the planner plus the
-// problems that prevented some selections from producing links. Both are sorted
-// for determinism.
+// NoticeKind classifies a non-blocking projection notice: the link is produced,
+// but the user should know something about its effect.
+type NoticeKind int
+
+const (
+	// NoticeSharedSkillNamespace: a selection scoped skills to a subset of a
+	// shared skills directory, so other agents that read that directory will also
+	// see the skills. Reported so a scope botfile cannot enforce never lies
+	// silently (manifesto 49).
+	NoticeSharedSkillNamespace NoticeKind = iota
+)
+
+// String renders a NoticeKind as a stable, human-readable token.
+func (k NoticeKind) String() string {
+	switch k {
+	case NoticeSharedSkillNamespace:
+		return "shared-skill-namespace"
+	default:
+		return "unknown-notice"
+	}
+}
+
+// Notice is a non-blocking projection outcome: the install happens, but its
+// effect is broader than the selection literally named, and the user is told so.
+type Notice struct {
+	Kind        NoticeKind
+	SourceName  string
+	Namespace   string         // the shared directory the skills install into
+	Selected    []core.AgentID // agents the selection named that share this namespace
+	AlsoReaches []core.AgentID // other agents that read the namespace and will also see the skills
+	Detail      string
+}
+
+// Result is the projection output: the desired links for the planner, the
+// problems that prevented some selections from producing links, and the notices
+// about installs whose reach exceeds what a selection named. All are sorted for
+// determinism.
 type Result struct {
 	Links    []reconcile.LinkSpec
 	Problems []Problem
+	Notices  []Notice
 }
 
 // Project maps cfg's selections over the scanned sources and the agent matrix,
@@ -93,6 +128,11 @@ func Project(cfg core.Config, sources []Source, agents agent.Set, roots map[core
 	for _, s := range sources {
 		byName[s.Name] = s
 	}
+
+	// skillNS maps each skill-supporting agent to its skill directory, so a
+	// selection that scopes skills to a subset of a shared directory can be
+	// flagged (manifesto 49).
+	skillNS := skillNamespaces(agents, roots)
 
 	var res Result
 	for _, sel := range cfg.Selections {
@@ -159,10 +199,90 @@ func Project(cfg core.Config, sources []Source, agents agent.Set, roots map[core
 				})
 			}
 		}
+
+		// If this selection installs skills into a shared directory that agents
+		// it did not name also read, say so (manifesto 49): a scope botfile cannot
+		// enforce must never pass silently.
+		if matchesAnySkill(matched) {
+			res.Notices = append(res.Notices, skillNotices(sel, src.Name, skillNS)...)
+		}
 	}
 
 	sortResult(&res)
 	return res
+}
+
+// skillNamespaces maps each agent that supports skills to its skill directory.
+func skillNamespaces(agents agent.Set, roots map[core.AgentID]string) map[core.AgentID]string {
+	ns := make(map[core.AgentID]string)
+	for _, id := range agents.IDs() {
+		ag, ok := agents.Lookup(id)
+		if !ok {
+			continue
+		}
+		if dir, ok := ag.Namespace(roots[id], core.KindSkill); ok && roots[id] != "" {
+			ns[id] = dir
+		}
+	}
+	return ns
+}
+
+// matchesAnySkill reports whether any matched component is a skill.
+func matchesAnySkill(matched []match) bool {
+	for _, m := range matched {
+		if m.comp.Kind == core.KindSkill {
+			return true
+		}
+	}
+	return false
+}
+
+// skillNotices flags each shared skill directory this selection scopes to a
+// subset of: for every directory a named skill-agent installs into, any other
+// skill-agent that reads the same directory but was not named is an "also
+// reaches" surprise (manifesto 49).
+func skillNotices(sel core.Selection, sourceName string, skillNS map[core.AgentID]string) []Notice {
+	reachByDir := make(map[string][]core.AgentID)
+	for id, dir := range skillNS {
+		reachByDir[dir] = append(reachByDir[dir], id)
+	}
+
+	var notices []Notice
+	seenDir := make(map[string]bool)
+	for _, a := range sel.Agents {
+		dir, ok := skillNS[a]
+		if !ok || seenDir[dir] {
+			continue
+		}
+		seenDir[dir] = true
+
+		named := make(map[core.AgentID]bool)
+		for _, b := range sel.Agents {
+			if skillNS[b] == dir {
+				named[b] = true
+			}
+		}
+
+		var selected, surprise []core.AgentID
+		for _, id := range reachByDir[dir] {
+			if named[id] {
+				selected = append(selected, id)
+			} else {
+				surprise = append(surprise, id)
+			}
+		}
+		if len(surprise) == 0 {
+			continue
+		}
+		sortAgents(selected)
+		sortAgents(surprise)
+		notices = append(notices, Notice{
+			Kind: NoticeSharedSkillNamespace, SourceName: sourceName, Namespace: dir,
+			Selected: selected, AlsoReaches: surprise,
+			Detail: "skills scoped to these agents install into a shared directory other agents also read",
+		})
+	}
+	return notices
 }
 
 // match is one matched (plugin, component) pair within a source.
@@ -237,4 +357,16 @@ func sortResult(res *Result) {
 		}
 		return a.Agent < b.Agent
 	})
+	sort.Slice(res.Notices, func(i, j int) bool {
+		a, b := res.Notices[i], res.Notices[j]
+		if a.SourceName != b.SourceName {
+			return a.SourceName < b.SourceName
+		}
+		return a.Namespace < b.Namespace
+	})
+}
+
+// sortAgents sorts a slice of agent IDs in place, for deterministic output.
+func sortAgents(ids []core.AgentID) {
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 }
