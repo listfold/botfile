@@ -143,6 +143,59 @@ func TestScanInvalidComponentNameIsProblem(t *testing.T) {
 	}
 }
 
+func TestScanSkillManifestNotRegularIsProblem(t *testing.T) {
+	t.Parallel()
+	// A directory named SKILL.md is not a manifest (manifesto 48).
+	fsys := fstest.MapFS{
+		"p/skills/foo/SKILL.md": dir(),
+		"p/skills/ok/SKILL.md":  file("ok"),
+	}
+	res := Scan(fsys)
+	if got := componentNames(res); len(got) != 1 || got[0] != "skill/ok" {
+		t.Fatalf("components = %v, want [skill/ok]", got)
+	}
+	if !hasProblem(res, ProblemSkillMissingManifest, "p/skills/foo") {
+		t.Fatalf("expected skill-missing-manifest for a directory SKILL.md, got %+v", res.Problems)
+	}
+}
+
+func TestScanMemoryNonRegularIsProblem(t *testing.T) {
+	t.Parallel()
+	// A directory named note.md is not a memory (manifesto 48).
+	fsys := fstest.MapFS{
+		"p/memories/note.md": dir(),
+		"p/memories/ok.md":   file("ok"),
+	}
+	res := Scan(fsys)
+	if got := componentNames(res); len(got) != 1 || got[0] != "memory/ok" {
+		t.Fatalf("components = %v, want [memory/ok]", got)
+	}
+	if !hasProblem(res, ProblemMemoryNotMarkdown, "p/memories/note.md") {
+		t.Fatalf("expected memory-not-markdown for a directory note.md, got %+v", res.Problems)
+	}
+}
+
+func TestScanHiddenComponentEntriesAreProblems(t *testing.T) {
+	t.Parallel()
+	// Hidden entries under a kind directory are component candidates, so they are
+	// flagged, not silently dropped (review 1dbd9e0).
+	fsys := fstest.MapFS{
+		"p/skills/.tool/SKILL.md": file("hidden skill"),
+		"p/memories/.secret.md":   file("hidden memory"),
+		"p/skills/real/SKILL.md":  file("a real one"),
+	}
+	res := Scan(fsys)
+	if got := componentNames(res); len(got) != 1 || got[0] != "skill/real" {
+		t.Fatalf("components = %v, want [skill/real]", got)
+	}
+	if !hasProblem(res, ProblemHiddenComponent, "p/skills/.tool") {
+		t.Fatalf("expected hidden-component for p/skills/.tool, got %+v", res.Problems)
+	}
+	if !hasProblem(res, ProblemHiddenComponent, "p/memories/.secret.md") {
+		t.Fatalf("expected hidden-component for p/memories/.secret.md, got %+v", res.Problems)
+	}
+}
+
 func TestLayoutRoundTrip(t *testing.T) {
 	t.Parallel()
 	if d, ok := DirForKind(core.KindSkill); !ok || d != "skills" {

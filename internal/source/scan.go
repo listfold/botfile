@@ -29,9 +29,13 @@ const (
 	// ProblemSkillMissingManifest: a skill directory has no SKILL.md (manifesto
 	// 17, 48).
 	ProblemSkillMissingManifest
-	// ProblemMemoryNotMarkdown: an entry under memories/ is not a .md file
-	// (manifesto 48).
+	// ProblemMemoryNotMarkdown: an entry under memories/ is not a regular .md
+	// file (manifesto 48).
 	ProblemMemoryNotMarkdown
+	// ProblemHiddenComponent: a hidden (dotfile) entry sits directly under a kind
+	// directory, where entries are component candidates, so it is reported rather
+	// than silently skipped.
+	ProblemHiddenComponent
 )
 
 // String renders a ProblemKind as a stable, human-readable token.
@@ -49,6 +53,8 @@ func (k ProblemKind) String() string {
 		return "skill-missing-manifest"
 	case ProblemMemoryNotMarkdown:
 		return "memory-not-markdown"
+	case ProblemHiddenComponent:
+		return "hidden-component"
 	default:
 		return "unknown-problem"
 	}
@@ -150,7 +156,14 @@ func scanKind(fsys fs.FS, pluginName, kindDir string, kind core.Kind, plugin *co
 	}
 
 	for _, e := range entries {
+		// Inside a kind directory every entry is a component candidate, so a
+		// hidden entry is reported rather than silently skipped (the dotfile
+		// furniture exception applies only at the source and plugin levels).
 		if isHidden(e.Name()) {
+			res.Problems = append(res.Problems, Problem{
+				Kind: ProblemHiddenComponent, Path: path.Join(base, e.Name()),
+				Detail: "a hidden entry under a kind directory is not a valid component",
+			})
 			continue
 		}
 		switch kind {
@@ -178,10 +191,14 @@ func scanSkill(fsys fs.FS, base string, e fs.DirEntry, plugin *core.Plugin, res 
 		res.Problems = append(res.Problems, Problem{Kind: ProblemInvalidName, Path: entryPath, Detail: err.Error()})
 		return
 	}
-	if _, err := fs.Stat(fsys, path.Join(entryPath, ManifestFile)); err != nil {
+	// The manifest must be a regular file, not a directory named SKILL.md or any
+	// other special entry (manifesto 48). fs.Stat resolves a symlink to its
+	// target, so a manifest that is a symlink to a regular file is accepted.
+	info, err := fs.Stat(fsys, path.Join(entryPath, ManifestFile))
+	if err != nil || !info.Mode().IsRegular() {
 		res.Problems = append(res.Problems, Problem{
 			Kind: ProblemSkillMissingManifest, Path: entryPath,
-			Detail: "missing " + ManifestFile,
+			Detail: ManifestFile + " is missing or is not a regular file",
 		})
 		return
 	}
@@ -192,11 +209,14 @@ func scanSkill(fsys fs.FS, base string, e fs.DirEntry, plugin *core.Plugin, res 
 // (manifesto 48).
 func scanMemory(base string, e fs.DirEntry, plugin *core.Plugin, res *Result) {
 	entryPath := path.Join(base, e.Name())
+	// A memory must be a regular .md file: not a directory, symlink, or other
+	// special entry (manifesto 48). DirEntry.Type does not follow symlinks, so a
+	// symlink entry is correctly rejected as non-regular.
 	name, ok := memoryName(e.Name())
-	if e.IsDir() || !ok {
+	if !e.Type().IsRegular() || !ok {
 		res.Problems = append(res.Problems, Problem{
 			Kind: ProblemMemoryNotMarkdown, Path: entryPath,
-			Detail: "a memory must be a " + memoryExt + " file",
+			Detail: "a memory must be a regular " + memoryExt + " file",
 		})
 		return
 	}
