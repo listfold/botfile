@@ -239,10 +239,12 @@ func NewSet(specs ...Spec) (Set, error) {
 //
 // Skills (tier 1 auto-discovery: one directory per skill, each with a SKILL.md,
 // found by presence, manifesto 17, 22, 48) are specified for claude-code,
-// codex-cli, and copilot-cli. Memory is specified only for claude-code; codex
-// and copilot memory remain unsupported because each would need a SessionStart
-// hook, which botfile never does (manifesto 18, 25). opencode, copilot-vscode,
-// and pi.dev are pending vendor confirmation.
+// codex-cli, and copilot-cli. Memory is specified only for claude-code (tier 1).
+// codex-cli memory is unsupported (a single merged AGENTS.md, no per-file
+// surface; manifesto 18). copilot-cli memory is tier-2-supportable via
+// COPILOT_CUSTOM_INSTRUCTIONS_DIRS (manifesto 18, 23) but is not yet in the
+// matrix, pending a tier-2 registration mechanism. opencode, copilot-vscode, and
+// pi.dev are pending vendor confirmation.
 func Default() Set {
 	set, err := NewSet(
 		Spec{
