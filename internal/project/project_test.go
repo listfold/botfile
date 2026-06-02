@@ -102,8 +102,8 @@ func TestProjectCodexSkillYesMemoryNo(t *testing.T) {
 		Agents: []core.AgentID{core.AgentCodexCLI},
 	})
 	res := Project(cfg, []Source{codingSource()}, agent.Default(), roots())
-	if len(res.Links) != 1 || res.Links[0].Target != "/home/u/.codex/skills/go-style" {
-		t.Fatalf("links = %+v, want only the codex skill under ~/.codex/skills", res.Links)
+	if len(res.Links) != 1 || res.Links[0].Target != "/home/u/.agents/skills/go-style" {
+		t.Fatalf("links = %+v, want only the codex skill under ~/.agents/skills", res.Links)
 	}
 	if len(res.Problems) != 1 || res.Problems[0].Kind != ProblemUnsupported || res.Problems[0].Component != "memory/style" {
 		t.Fatalf("want one unsupported problem for memory/style, got %+v", res.Problems)

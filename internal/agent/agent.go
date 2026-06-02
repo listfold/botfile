@@ -258,10 +258,15 @@ func Default() Set {
 			},
 		},
 		Spec{
-			// codex-cli discovers personal skills under ~/.codex/skills/ (CODEX_HOME
-			// overrides ~/.codex), scanning the tree for SKILL.md by presence; tier 1.
+			// codex-cli discovers a user's personal skills under ~/.agents/skills/,
+			// each a directory with SKILL.md, scanned by presence; tier 1. This is a
+			// cross-agent location (copilot-cli also reads ~/.agents/skills), so a
+			// skill installed here for codex is visible to other agents that scan it;
+			// see the callouts. CODEX_HOME relocates ~/.codex state but not skill
+			// discovery, so it is not an override here.
+			// Source: developers.openai.com/codex/skills.
 			ID:   core.AgentCodexCLI,
-			Base: Base{HomeRelative: []string{".codex"}, EnvOverride: "CODEX_HOME"},
+			Base: Base{HomeRelative: []string{".agents"}},
 			Rules: map[core.Kind]InstallRule{
 				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
 			},

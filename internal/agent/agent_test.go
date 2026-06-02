@@ -73,7 +73,8 @@ func TestCodexAndCopilotSkillsOnly(t *testing.T) {
 		id       core.AgentID
 		wantRoot string
 	}{
-		{core.AgentCodexCLI, "/home/u/.codex"},
+		// codex user skills live under the cross-agent ~/.agents root, not ~/.codex.
+		{core.AgentCodexCLI, "/home/u/.agents"},
 		{core.AgentCopilotCLI, "/home/u/.copilot"},
 	}
 	for _, tc := range cases {
@@ -96,8 +97,10 @@ func TestCodexAndCopilotSkillsOnly(t *testing.T) {
 	}
 }
 
-func TestCodexHomeOverride(t *testing.T) {
+func TestCodexHomeDoesNotMoveSkills(t *testing.T) {
 	t.Parallel()
+	// CODEX_HOME relocates ~/.codex state but not skill discovery (which is under
+	// ~/.agents), so it must not change the resolved root.
 	ag, _ := Default().Lookup(core.AgentCodexCLI)
 	getenv := func(k string) string {
 		if k == "CODEX_HOME" {
@@ -105,8 +108,8 @@ func TestCodexHomeOverride(t *testing.T) {
 		}
 		return ""
 	}
-	if root := ag.Root("/home/u", getenv); root != "/custom/codex" {
-		t.Fatalf("root = %q, want /custom/codex (CODEX_HOME)", root)
+	if root := ag.Root("/home/u", getenv); root != "/home/u/.agents" {
+		t.Fatalf("root = %q, want /home/u/.agents (CODEX_HOME must not move skills)", root)
 	}
 }
 
