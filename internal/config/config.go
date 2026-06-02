@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 
@@ -68,8 +69,20 @@ func Load(path string) (core.Config, error) {
 // decoding and validation independently testable.
 func Parse(data []byte) (core.Config, error) {
 	var wire wireConfig
-	if _, err := toml.Decode(string(data), &wire); err != nil {
+	meta, err := toml.Decode(string(data), &wire)
+	if err != nil {
 		return core.Config{}, fmt.Errorf("decode config: %w", err)
+	}
+	// Reject unknown keys rather than ignore them: because plugin and component
+	// default to the wildcard, a silently dropped typo (for example
+	// "components" for "component") would widen a selection to everything
+	// instead of failing (manifesto 39). Surface it before defaulting.
+	if undecoded := meta.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, 0, len(undecoded))
+		for _, k := range undecoded {
+			keys = append(keys, k.String())
+		}
+		return core.Config{}, fmt.Errorf("decode config: unknown key(s): %s", strings.Join(keys, ", "))
 	}
 
 	cfg := core.Config{

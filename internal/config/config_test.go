@@ -78,6 +78,21 @@ name = "team"
 location = ""
 `},
 		{"malformed toml", `[[sources]`},
+		{"misspelled optional key", `
+[[sources]]
+name = "team"
+location = "/srv/team"
+[[selections]]
+source = "team"
+components = "skill/secret"
+agents = ["claude-code"]
+`},
+		{"unknown top-level key", `
+nonsense = true
+[[sources]]
+name = "team"
+location = "/srv/team"
+`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

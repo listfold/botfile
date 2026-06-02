@@ -18,6 +18,10 @@ func TestParseComponentID(t *testing.T) {
 		{name: "unknown kind", id: "hook/pre", wantErr: true},
 		{name: "empty name", id: "skill/", wantErr: true},
 		{name: "nested name", id: "skill/a/b", wantErr: true},
+		{name: "backslash name", id: `skill/a\b`, wantErr: true},
+		{name: "leading space name", id: "skill/ name", wantErr: true},
+		{name: "trailing space name", id: "skill/name ", wantErr: true},
+		{name: "wildcard name", id: "skill/*", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

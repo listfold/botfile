@@ -64,11 +64,12 @@ func ParseComponentID(id string) (ref ComponentRef, isWildcard bool, err error) 
 	if !IsKnownKind(kind) {
 		return ComponentRef{}, false, fmt.Errorf("component id %q has unknown kind %q", id, kindPart)
 	}
-	if namePart == "" {
-		return ComponentRef{}, false, fmt.Errorf("component id %q is missing a name after %q", id, kindPart+"/")
-	}
-	if strings.ContainsAny(namePart, "/") {
-		return ComponentRef{}, false, fmt.Errorf("component id %q name %q must not contain %q", id, namePart, "/")
+	// Component names become path segments at scan and reconcile time, so they
+	// obey the same rule as source and plugin names (no separators, whitespace,
+	// or the wildcard token). The id-level "/" split above has already consumed
+	// the kind separator; anything left must be a clean single segment.
+	if err := validateName("component name", namePart); err != nil {
+		return ComponentRef{}, false, fmt.Errorf("component id %q: %w", id, err)
 	}
 	return ComponentRef{Kind: kind, Name: namePart}, false, nil
 }
@@ -87,13 +88,15 @@ func (c Component) Ref() ComponentRef {
 	return ComponentRef{Kind: c.Kind, Name: c.Name}
 }
 
-// Validate checks that the component names a known kind and carries a name.
+// Validate checks that the component names a known kind and a clean name (the
+// same single-segment rule used for source and plugin names, since the name
+// becomes a path segment during scanning and reconciliation).
 func (c Component) Validate() error {
 	if !IsKnownKind(c.Kind) {
 		return fmt.Errorf("component kind %q is not known", c.Kind)
 	}
-	if strings.TrimSpace(c.Name) == "" {
-		return fmt.Errorf("component of kind %q has an empty name", c.Kind)
+	if err := validateName("component name", c.Name); err != nil {
+		return fmt.Errorf("component of kind %q: %w", c.Kind, err)
 	}
 	return nil
 }
