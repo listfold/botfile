@@ -122,6 +122,22 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
+func TestValidateName(t *testing.T) {
+	t.Parallel()
+	valid := []string{"team", "go-style", "coding_standards", "a.b", "v2"}
+	for _, n := range valid {
+		if err := ValidateName("name", n); err != nil {
+			t.Errorf("ValidateName(%q) unexpected error: %v", n, err)
+		}
+	}
+	invalid := []string{"", "*", "bad name", "tab\tname", " leading", "trailing ", "a/b", `a\b`}
+	for _, n := range invalid {
+		if err := ValidateName("name", n); err == nil {
+			t.Errorf("ValidateName(%q): want error, got nil", n)
+		}
+	}
+}
+
 func TestIsKnownAgent(t *testing.T) {
 	t.Parallel()
 	if !IsKnownAgent(AgentPiDev) {

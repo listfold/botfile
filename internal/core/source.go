@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // Source is a curated repository or directory of components (manifesto 8): for
@@ -21,7 +22,7 @@ type Source struct {
 // Validate checks a source in isolation. Cross-source concerns (unique names)
 // are checked by Config.Validate.
 func (s Source) Validate() error {
-	if err := validateName("source name", s.Name); err != nil {
+	if err := ValidateName("source name", s.Name); err != nil {
 		return err
 	}
 	if strings.TrimSpace(s.Location) == "" {
@@ -39,22 +40,36 @@ type Plugin struct {
 	Components []Component
 }
 
-// validateName enforces the shared rule for identifiers that double as
+// Validate checks the plugin's name and every component it holds.
+func (p Plugin) Validate() error {
+	if err := ValidateName("plugin name", p.Name); err != nil {
+		return err
+	}
+	for _, c := range p.Components {
+		if err := c.Validate(); err != nil {
+			return fmt.Errorf("plugin %q: %w", p.Name, err)
+		}
+	}
+	return nil
+}
+
+// ValidateName enforces the shared rule for identifiers that double as
 // reference keys and may appear as path segments: non-empty, no whitespace, no
 // path separators, and not the wildcard token (which has dedicated meaning in
-// selections, manifesto 39).
-func validateName(what, name string) error {
-	if strings.TrimSpace(name) == "" {
+// selections, manifesto 39). It is the single source for this rule across
+// source, plugin, and component names (including the source scanner).
+func ValidateName(what, name string) error {
+	if name == "" {
 		return fmt.Errorf("%s is empty", what)
 	}
 	if name == Wildcard {
 		return fmt.Errorf("%s must not be the wildcard %q", what, Wildcard)
 	}
+	if strings.IndexFunc(name, unicode.IsSpace) >= 0 {
+		return fmt.Errorf("%s %q must not contain whitespace", what, name)
+	}
 	if strings.ContainsAny(name, "/\\") {
 		return fmt.Errorf("%s %q must not contain a path separator", what, name)
-	}
-	if strings.TrimSpace(name) != name {
-		return fmt.Errorf("%s %q must not have leading or trailing whitespace", what, name)
 	}
 	return nil
 }

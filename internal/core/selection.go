@@ -32,11 +32,11 @@ func (s Selection) MatchesAllComponents() bool {
 // refers to a declared source lives in Config.Validate, which can see the whole
 // configuration.
 func (s Selection) Validate() error {
-	if err := validateName("selection source", s.SourceName); err != nil {
+	if err := ValidateName("selection source", s.SourceName); err != nil {
 		return err
 	}
 	if s.PluginName != Wildcard {
-		if err := validateName("selection plugin", s.PluginName); err != nil {
+		if err := ValidateName("selection plugin", s.PluginName); err != nil {
 			return err
 		}
 	}

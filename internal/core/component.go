@@ -68,7 +68,7 @@ func ParseComponentID(id string) (ref ComponentRef, isWildcard bool, err error) 
 	// obey the same rule as source and plugin names (no separators, whitespace,
 	// or the wildcard token). The id-level "/" split above has already consumed
 	// the kind separator; anything left must be a clean single segment.
-	if err := validateName("component name", namePart); err != nil {
+	if err := ValidateName("component name", namePart); err != nil {
 		return ComponentRef{}, false, fmt.Errorf("component id %q: %w", id, err)
 	}
 	return ComponentRef{Kind: kind, Name: namePart}, false, nil
@@ -95,7 +95,7 @@ func (c Component) Validate() error {
 	if !IsKnownKind(c.Kind) {
 		return fmt.Errorf("component kind %q is not known", c.Kind)
 	}
-	if err := validateName("component name", c.Name); err != nil {
+	if err := ValidateName("component name", c.Name); err != nil {
 		return fmt.Errorf("component of kind %q: %w", c.Kind, err)
 	}
 	return nil
