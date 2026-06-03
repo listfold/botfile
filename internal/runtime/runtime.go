@@ -56,21 +56,34 @@ const (
 type BlockerKind int
 
 const (
+	// BlockerScanProblem: a source component was malformed or unreadable and
+	// dropped from the desired set, leaving the model incomplete.
+	BlockerScanProblem BlockerKind = iota
+	// BlockerProjectionProblem: a selection matched nothing, named an unscanned
+	// source, or hit a layout gap, also leaving the model incomplete. Unsupported
+	// (agent, kind) is excluded; see blockers.
+	BlockerProjectionProblem
 	// BlockerPlanProblem: the desired model is malformed (a reconcile Problem),
 	// so the plan must not be applied (reviews/patterns.md).
-	BlockerPlanProblem BlockerKind = iota
+	BlockerPlanProblem
 	// BlockerConflict: an entry botfile does not own occupies a target path, so
 	// the desired state cannot be realized there (manifesto 35).
 	BlockerConflict
 )
 
-// Blocker is a machine-detectable reason the reducer did not apply. Scan and
-// projection problems are deliberately not blockers: an unsupported (agent,
-// kind) or a stray source file is expected partial coverage, reported on the
-// Model but not a reason to halt every clean install.
+// Blocker is a machine-detectable reason the reducer did not apply.
+//
+// The dividing line is whether the desired model is trustworthy enough to act
+// on, in particular to perform destructive orphan removal: orphan cleanup
+// removes a managed symlink not in the desired set, so a desired set made
+// incomplete by a problem (a typo'd selection, a malformed source, an unreadable
+// directory) would delete a correct, previously-installed link. Such problems
+// block. The one exception is an unsupported (agent, kind): its namespace is
+// never scanned for orphans, it is expected partial coverage, and it is
+// persistent, so it is reported but never blocks.
 type Blocker struct {
 	Kind   BlockerKind
-	Target string
+	Ref    string // the path, source, or component the blocker concerns
 	Detail string
 }
 
@@ -212,7 +225,7 @@ func Update(m Model, msg Msg) (Model, Cmd) {
 		if wr, ok := msg.(WorldRead); ok {
 			// Pure: compute the plan, then the blockers that decide whether to apply.
 			m.Plan = reconcile.Reconcile(m.Projection.Links, wr.World, reconcileOpts(m.Sources))
-			m.Blockers = blockers(m.Plan)
+			m.Blockers = blockers(m)
 			if m.Mode == ModePlan {
 				m.Phase = PhaseDone // read-only: report the plan and its blockers
 				return m, CmdNone{}
@@ -241,17 +254,32 @@ func (m Model) Done() bool {
 	return m.Phase == PhaseDone || m.Phase == PhaseBlocked || m.Phase == PhaseFailed
 }
 
-// blockers enumerates the machine-detectable reasons not to apply a plan: a
-// malformed desired model (reconcile Problems) and an unmanaged entry occupying
-// a managed path (Conflicts). They derive from already-sorted slices, so the
-// result is deterministic.
-func blockers(plan reconcile.Plan) []Blocker {
-	bs := make([]Blocker, 0, len(plan.Problems)+len(plan.Conflicts))
-	for _, p := range plan.Problems {
-		bs = append(bs, Blocker{Kind: BlockerPlanProblem, Target: p.Target, Detail: p.Detail})
+// blockers enumerates the machine-detectable reasons not to apply: any problem
+// that leaves the desired model incomplete (so orphan removal would be unsafe) or
+// an observed conflict. Scan problems and projection problems both leave the
+// model incomplete, except an unsupported (agent, kind), which is expected
+// partial coverage and never blocks. The slices it reads are already sorted, so
+// the result is deterministic.
+func blockers(m Model) []Blocker {
+	var bs []Blocker
+	for _, p := range m.ScanProblems {
+		bs = append(bs, Blocker{Kind: BlockerScanProblem, Ref: p.Path, Detail: p.Detail})
 	}
-	for _, c := range plan.Conflicts {
-		bs = append(bs, Blocker{Kind: BlockerConflict, Target: c.Target, Detail: c.Reason})
+	for _, p := range m.Projection.Problems {
+		if p.Kind == project.ProblemUnsupported {
+			continue // expected partial coverage; its namespace is not scanned for orphans
+		}
+		ref := p.SourceName
+		if p.Component != "" {
+			ref = p.SourceName + ":" + p.Component
+		}
+		bs = append(bs, Blocker{Kind: BlockerProjectionProblem, Ref: ref, Detail: p.Detail})
+	}
+	for _, p := range m.Plan.Problems {
+		bs = append(bs, Blocker{Kind: BlockerPlanProblem, Ref: p.Target, Detail: p.Detail})
+	}
+	for _, c := range m.Plan.Conflicts {
+		bs = append(bs, Blocker{Kind: BlockerConflict, Ref: c.Target, Detail: c.Reason})
 	}
 	return bs
 }

@@ -8,6 +8,7 @@ import (
 	"codeberg.org/botfile/botfile/internal/core"
 	"codeberg.org/botfile/botfile/internal/project"
 	"codeberg.org/botfile/botfile/internal/reconcile"
+	"codeberg.org/botfile/botfile/internal/source"
 )
 
 func noEnv(string) string { return "" }
@@ -115,7 +116,7 @@ func TestSyncBlocksOnConflict(t *testing.T) {
 	if _, ok := cmd.(CmdNone); !ok || m.Phase != PhaseBlocked {
 		t.Fatalf("conflicting sync = phase %v cmd %T, want Blocked + CmdNone (no apply)", m.Phase, cmd)
 	}
-	if len(m.Blockers) != 1 || m.Blockers[0].Kind != BlockerConflict || m.Blockers[0].Target != "/home/u/.claude/skills/go-style" {
+	if len(m.Blockers) != 1 || m.Blockers[0].Kind != BlockerConflict || m.Blockers[0].Ref != "/home/u/.claude/skills/go-style" {
 		t.Fatalf("blockers = %+v, want one conflict at the skill target", m.Blockers)
 	}
 	if !m.Done() {
@@ -123,18 +124,126 @@ func TestSyncBlocksOnConflict(t *testing.T) {
 	}
 }
 
-func TestBlockersClassifyProblemsAndConflicts(t *testing.T) {
+func TestBlockersClassifyAllIncompleteModelCauses(t *testing.T) {
 	t.Parallel()
-	plan := reconcile.Plan{
-		Problems:  []reconcile.Problem{{Kind: reconcile.ProblemAmbiguousTarget, Target: "/t/x", Detail: "ambiguous"}},
-		Conflicts: []reconcile.Conflict{{Target: "/t/y", Reason: "foreign file"}},
+	m := Model{
+		ScanProblems: []source.Problem{{Kind: source.ProblemSkillMissingManifest, Path: "p/skills/x", Detail: "no SKILL.md"}},
+		Projection: project.Result{Problems: []project.Problem{
+			{Kind: project.ProblemEmptySelection, SourceName: "team", Detail: "matched nothing"},
+			{Kind: project.ProblemUnsupported, SourceName: "team", Agent: core.AgentCodexCLI, Component: "memory/x", Detail: "unsupported"},
+		}},
+		Plan: reconcile.Plan{
+			Problems:  []reconcile.Problem{{Kind: reconcile.ProblemAmbiguousTarget, Target: "/t/x", Detail: "ambiguous"}},
+			Conflicts: []reconcile.Conflict{{Target: "/t/y", Reason: "foreign file"}},
+		},
 	}
-	bs := blockers(plan)
-	if len(bs) != 2 {
-		t.Fatalf("blockers = %+v, want one per problem and conflict", bs)
+	bs := blockers(m)
+	// scan + projection(empty, not unsupported) + plan + conflict = 4; unsupported excluded.
+	if len(bs) != 4 {
+		t.Fatalf("blockers = %+v, want 4 (unsupported excluded)", bs)
 	}
-	if bs[0].Kind != BlockerPlanProblem || bs[1].Kind != BlockerConflict {
-		t.Fatalf("blocker kinds = %v, %v; want plan-problem then conflict", bs[0].Kind, bs[1].Kind)
+	kinds := map[BlockerKind]bool{}
+	for _, b := range bs {
+		kinds[b.Kind] = true
+	}
+	for _, want := range []BlockerKind{BlockerScanProblem, BlockerProjectionProblem, BlockerPlanProblem, BlockerConflict} {
+		if !kinds[want] {
+			t.Errorf("missing blocker kind %v", want)
+		}
+	}
+}
+
+func TestSyncBlocksOnProjectionTypoSparingExistingLink(t *testing.T) {
+	t.Parallel()
+	// A typo'd selector matches nothing (ProblemEmptySelection) and produces no
+	// desired link. An existing managed symlink would look like an orphan; sync
+	// must NOT apply (and so must not remove it) while the model is incomplete.
+	cfg := core.Config{
+		Sources: []core.Source{{Name: "team", Location: "/src/team"}},
+		Selections: []core.Selection{{
+			SourceName: "team", PluginName: core.Wildcard, ComponentID: "skill/go-styel", // typo
+			Agents: []core.AgentID{core.AgentClaudeCode},
+		}},
+	}
+	m, _ := newModel(t, ModeSync)
+	m, _ = Update(m, ConfigLoaded{Config: cfg})
+	m, _ = Update(m, SourcesScanned{Sources: []project.Source{scannedTeam()}})
+	// The correct link is already installed; with the typo it is now an orphan
+	// candidate in the world.
+	world := reconcile.World{Entries: map[string]reconcile.Entry{
+		"/home/u/.claude/skills/go-style": {Kind: reconcile.Symlink, Dest: "/src/team/coding/skills/go-style"},
+	}}
+	m, cmd := Update(m, WorldRead{World: world})
+	if _, ok := cmd.(CmdApply); ok {
+		t.Fatalf("sync emitted CmdApply despite a projection problem: %T", cmd)
+	}
+	if m.Phase != PhaseBlocked {
+		t.Fatalf("phase = %v, want Blocked", m.Phase)
+	}
+	if len(m.Blockers) == 0 || m.Blockers[0].Kind != BlockerProjectionProblem {
+		t.Fatalf("blockers = %+v, want a projection-problem blocker", m.Blockers)
+	}
+}
+
+func TestSyncBlocksOnScanProblem(t *testing.T) {
+	t.Parallel()
+	m, _ := newModel(t, ModeSync)
+	m, _ = Update(m, ConfigLoaded{Config: testConfig()})
+	m, _ = Update(m, SourcesScanned{
+		Sources:  []project.Source{scannedTeam()},
+		Problems: []source.Problem{{Kind: source.ProblemSkillMissingManifest, Path: "coding/skills/broken", Detail: "no SKILL.md"}},
+	})
+	m, cmd := Update(m, WorldRead{World: reconcile.World{Entries: map[string]reconcile.Entry{}}})
+	if _, ok := cmd.(CmdApply); ok {
+		t.Fatalf("sync emitted CmdApply despite a scan problem: %T", cmd)
+	}
+	if m.Phase != PhaseBlocked || len(m.Blockers) != 1 || m.Blockers[0].Kind != BlockerScanProblem {
+		t.Fatalf("phase %v blockers %+v, want Blocked with a scan-problem blocker", m.Phase, m.Blockers)
+	}
+}
+
+func TestSyncProceedsWhenOnlyUnsupported(t *testing.T) {
+	t.Parallel()
+	// A config that selects everything for claude and codex: codex memory is
+	// unsupported (a projection problem) but that is expected partial coverage and
+	// must NOT block the clean installs.
+	cfg := core.Config{
+		Sources: []core.Source{{Name: "team", Location: "/src/team"}},
+		Selections: []core.Selection{{
+			SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
+			Agents: []core.AgentID{core.AgentClaudeCode, core.AgentCodexCLI},
+		}},
+	}
+	scanned := project.Source{
+		Name: "team", Root: "/src/team",
+		Plugins: []core.Plugin{{
+			Name: "coding",
+			Components: []core.Component{
+				{Kind: core.KindSkill, Name: "go-style"},
+				{Kind: core.KindMemory, Name: "style"},
+			},
+		}},
+	}
+	m, _ := newModel(t, ModeSync)
+	m, _ = Update(m, ConfigLoaded{Config: cfg})
+	m, _ = Update(m, SourcesScanned{Sources: []project.Source{scanned}})
+	m, cmd := Update(m, WorldRead{World: reconcile.World{Entries: map[string]reconcile.Entry{}}})
+
+	if _, ok := cmd.(CmdApply); !ok || m.Phase != PhaseApplying {
+		t.Fatalf("unsupported-only sync = phase %v cmd %T, want Applying + CmdApply", m.Phase, cmd)
+	}
+	if len(m.Blockers) != 0 {
+		t.Fatalf("unsupported must not block, got blockers %+v", m.Blockers)
+	}
+	// The unsupported problem is still recorded for reporting.
+	foundUnsupported := false
+	for _, p := range m.Projection.Problems {
+		if p.Kind == project.ProblemUnsupported {
+			foundUnsupported = true
+		}
+	}
+	if !foundUnsupported {
+		t.Fatal("expected the codex memory unsupported problem to be recorded")
 	}
 }
 
