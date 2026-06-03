@@ -135,10 +135,62 @@ func TestCodexAndCopilotSkillsOnly(t *testing.T) {
 		if !ok || skill != tc.wantRoot+"/skills/deploy" {
 			t.Errorf("%s skill target = %q,%v, want %s/skills/deploy", tc.id, skill, ok, tc.wantRoot)
 		}
-		// Instructions stay unsupported for codex and copilot (manifesto 18).
-		if ag.Supports(core.KindInstruction) {
-			t.Errorf("%s must not support instruction (manifesto 18)", tc.id)
+	}
+}
+
+func TestSingletonInstructionTargets(t *testing.T) {
+	t.Parallel()
+	// The singleton-file agents support instructions as one fixed file under their
+	// own root (distinct from their skills root, slice 2). The component name is
+	// ignored: every instruction maps to the agent's one file.
+	roots := Default().ResolveRoots("/home/u", noEnv)
+	cases := []struct {
+		id       core.AgentID
+		wantFile string
+	}{
+		{core.AgentCodexCLI, "/home/u/.codex/AGENTS.md"},
+		{core.AgentOpenCode, "/home/u/.config/opencode/AGENTS.md"},
+		{core.AgentPiDev, "/home/u/.pi/agent/AGENTS.md"},
+		{core.AgentCopilotCLI, "/home/u/.copilot/copilot-instructions.md"},
+	}
+	for _, tc := range cases {
+		ag, _ := Default().Lookup(tc.id)
+		root, ok := roots.For(tc.id, core.KindInstruction)
+		if !ok {
+			t.Errorf("%s: no resolved instruction root", tc.id)
+			continue
 		}
+		// Two different component names both resolve to the one fixed file.
+		for _, name := range []string{"go-style", "preferences"} {
+			got, ok := ag.Target(root, core.KindInstruction, name)
+			if !ok || got != tc.wantFile {
+				t.Errorf("%s instruction target for %q = %q,%v, want %s", tc.id, name, got, ok, tc.wantFile)
+			}
+		}
+	}
+}
+
+func TestSingletonInstructionRootHonorsEnv(t *testing.T) {
+	t.Parallel()
+	// CODEX_HOME / COPILOT_HOME move the singleton instruction root (which is the
+	// agent's state dir), not the cross-agent skills root.
+	getenv := func(k string) string {
+		switch k {
+		case "CODEX_HOME":
+			return "/custom/codex"
+		case "COPILOT_HOME":
+			return "/custom/copilot"
+		}
+		return ""
+	}
+	roots := Default().ResolveRoots("/home/u", getenv)
+	codex, _ := Default().Lookup(core.AgentCodexCLI)
+	cRoot, _ := roots.For(core.AgentCodexCLI, core.KindInstruction)
+	if got, _ := codex.Target(cRoot, core.KindInstruction, "x"); got != "/custom/codex/AGENTS.md" {
+		t.Errorf("codex instruction with CODEX_HOME = %q, want /custom/codex/AGENTS.md", got)
+	}
+	if root, _ := roots.For(core.AgentCodexCLI, core.KindSkill); root != "/home/u/.agents" {
+		t.Errorf("codex skill root with CODEX_HOME = %q, want /home/u/.agents (unmoved)", root)
 	}
 }
 
@@ -225,6 +277,18 @@ func TestNewAgentValidation(t *testing.T) {
 		}},
 		{"file without ext", func(s *Spec) {
 			s.Rules = map[core.Kind]InstallRule{core.KindInstruction: {Tier: Tier1, Segments: []string{"rules"}, Shape: LeafFile}}
+		}},
+		{"fixed without filename", func(s *Spec) {
+			s.Rules = map[core.Kind]InstallRule{core.KindInstruction: {Tier: Tier1, Shape: LeafFixed}}
+		}},
+		{"fixed with ext", func(s *Spec) {
+			s.Rules = map[core.Kind]InstallRule{core.KindInstruction: {Tier: Tier1, Shape: LeafFixed, Filename: "AGENTS.md", Ext: ".md"}}
+		}},
+		{"file with filename", func(s *Spec) {
+			s.Rules = map[core.Kind]InstallRule{core.KindInstruction: {Tier: Tier1, Segments: []string{"rules"}, Shape: LeafFile, Ext: ".md", Filename: "AGENTS.md"}}
+		}},
+		{"base override empty", func(s *Spec) {
+			s.Rules = map[core.Kind]InstallRule{core.KindSkill: {Tier: Tier1, Base: &Base{}, Segments: []string{"skills"}, Shape: LeafDir}}
 		}},
 		{"bad tier", func(s *Spec) {
 			s.Rules = map[core.Kind]InstallRule{core.KindSkill: {Tier: 9, Segments: []string{"skills"}, Shape: LeafDir}}

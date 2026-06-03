@@ -93,20 +93,33 @@ func TestProjectUnsupportedAgentIsProblem(t *testing.T) {
 	}
 }
 
-func TestProjectCodexSkillYesInstructionNo(t *testing.T) {
+func TestProjectCodexSkillAndSingletonInstruction(t *testing.T) {
 	t.Parallel()
-	// codex-cli supports skills (tier 1) but not instructions (manifesto 18): the
-	// skill installs, the instruction is an explicit unsupported problem.
+	// codex-cli installs skills under the shared ~/.agents/skills and its single
+	// instruction into the fixed file ~/.codex/AGENTS.md (a different root). Both
+	// land as links; nothing is unsupported.
 	cfg := cfgWith(core.Selection{
 		SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
 		Agents: []core.AgentID{core.AgentCodexCLI},
 	})
 	res := Project(cfg, []Source{codingSource()}, agent.Default(), roots())
-	if len(res.Links) != 1 || res.Links[0].Target != "/home/u/.agents/skills/go-style" {
-		t.Fatalf("links = %+v, want only the codex skill under ~/.agents/skills", res.Links)
+	if len(res.Problems) != 0 {
+		t.Fatalf("want no problems, got %+v", res.Problems)
 	}
-	if len(res.Problems) != 1 || res.Problems[0].Kind != ProblemUnsupported || res.Problems[0].Component != "instruction/style" {
-		t.Fatalf("want one unsupported problem for instruction/style, got %+v", res.Problems)
+	var skill, instr *reconcile.LinkSpec
+	for i := range res.Links {
+		switch res.Links[i].Target {
+		case "/home/u/.agents/skills/go-style":
+			skill = &res.Links[i]
+		case "/home/u/.codex/AGENTS.md":
+			instr = &res.Links[i]
+		}
+	}
+	if skill == nil {
+		t.Errorf("missing codex skill link under ~/.agents/skills: %+v", res.Links)
+	}
+	if instr == nil || instr.Dest != "/src/team/coding/instructions/style.md" {
+		t.Errorf("missing codex instruction link to ~/.codex/AGENTS.md: %+v", res.Links)
 	}
 }
 

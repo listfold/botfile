@@ -29,24 +29,42 @@ import (
 )
 
 // Tier is the support-rubric tier an (agent, kind) cell qualifies under
-// (manifesto 22-25): tier 1 is native auto-discovery, tier 2 is a one-time
-// settings or env-var registration. The projection treats both as supported; the
-// distinction drives later registration work, not path computation.
+// (manifesto 22-25, 51):
+//   - Tier1: a native drop-in directory the harness scans by presence (skills/,
+//     claude-code's rules/).
+//   - Tier2: a native fixed file the harness reads by presence (an AGENTS.md /
+//     copilot-instructions.md singleton). Same no-registration property as tier
+//     1, different cardinality.
+//   - Tier3: settings or env-var registration (a config write). Defined but used
+//     by no rule today; instructions reach every agent through tier 1 or tier 2.
+//
+// All three are "supported" for projection; the tier records how the harness
+// discovers the files, not how a path is computed.
 type Tier int
 
 const (
 	Tier1 Tier = 1
 	Tier2 Tier = 2
+	Tier3 Tier = 3
 )
 
 // LeafShape is how a component's installed entry is named in the agent's
-// namespace: a directory named <name> (a skill) or a file <name><ext> (an
-// instruction), per manifesto 48.
+// namespace (manifesto 48):
+//   - LeafDir: a directory named <name> (a skill).
+//   - LeafFile: a file <name><ext> in a drop-in directory (a claude-code
+//     instruction in rules/), one entry per component.
+//   - LeafFixed: a single fixed file whose name is the agent's, not the
+//     component's (an instruction an agent reads as one file: AGENTS.md,
+//     CLAUDE.md, copilot-instructions.md). Many components can target it, so the
+//     reconcile precedence and conflict rules (manifesto 35) decide the single
+//     occupant; botfile creates the symlink where the path is free and reports a
+//     conflict (never clobbers) where the user already has a file there.
 type LeafShape int
 
 const (
 	LeafDir LeafShape = iota
 	LeafFile
+	LeafFixed
 )
 
 // Base is how an agent's config root is located: the default path relative to
@@ -72,6 +90,7 @@ type InstallRule struct {
 	Segments []string // the kind's directory, relative to this kind's config root
 	Shape    LeafShape
 	Ext      string // leaf extension when Shape is LeafFile (for example ".md")
+	Filename string // the fixed leaf name when Shape is LeafFixed (for example "AGENTS.md")
 }
 
 // Spec is the external, validated description of one agent used to build a Set
@@ -166,17 +185,21 @@ func (a Agent) Namespace(root string, kind core.Kind) (string, bool) {
 
 // Target returns the absolute install path for a component of kind/name given
 // the agent's already-resolved config root, and whether the agent supports that
-// kind. The path is the kind's native per-kind directory under root plus the
-// component leaf: a directory for a skill, a <name><ext> file for an instruction
-// (manifesto 48).
+// kind. The path is the kind's per-kind directory under root plus the leaf: a
+// directory named <name> for a skill, a <name><ext> file for a drop-in
+// instruction, or the agent's fixed filename for a singleton instruction (which
+// ignores the component name, since the agent reads one file; manifesto 48).
 func (a Agent) Target(root string, kind core.Kind, name string) (string, bool) {
 	rule, ok := a.rules[kind]
 	if !ok {
 		return "", false
 	}
 	leaf := name
-	if rule.Shape == LeafFile {
+	switch rule.Shape {
+	case LeafFile:
 		leaf = name + rule.Ext
+	case LeafFixed:
+		leaf = rule.Filename
 	}
 	parts := make([]string, 0, len(rule.Segments)+2)
 	parts = append(parts, root)
@@ -276,7 +299,9 @@ func NewAgent(sp Spec) (Agent, error) {
 				}
 			}
 		}
-		if len(rule.Segments) == 0 {
+		// A singleton (LeafFixed) may live directly in its root, so it alone may
+		// have no segments; the directory kinds always need one.
+		if rule.Shape != LeafFixed && len(rule.Segments) == 0 {
 			return Agent{}, fmt.Errorf("agent %q kind %q: empty segments", sp.ID, kind)
 		}
 		for _, seg := range rule.Segments {
@@ -284,17 +309,27 @@ func NewAgent(sp Spec) (Agent, error) {
 				return Agent{}, fmt.Errorf("agent %q kind %q: empty path segment", sp.ID, kind)
 			}
 		}
-		if rule.Tier != Tier1 && rule.Tier != Tier2 {
+		if rule.Tier != Tier1 && rule.Tier != Tier2 && rule.Tier != Tier3 {
 			return Agent{}, fmt.Errorf("agent %q kind %q: invalid tier %d", sp.ID, kind, rule.Tier)
 		}
 		switch rule.Shape {
 		case LeafDir:
-			if rule.Ext != "" {
-				return Agent{}, fmt.Errorf("agent %q kind %q: a directory leaf must not set an extension", sp.ID, kind)
+			if rule.Ext != "" || rule.Filename != "" {
+				return Agent{}, fmt.Errorf("agent %q kind %q: a directory leaf must not set an extension or filename", sp.ID, kind)
 			}
 		case LeafFile:
 			if rule.Ext == "" {
 				return Agent{}, fmt.Errorf("agent %q kind %q: a file leaf requires an extension", sp.ID, kind)
+			}
+			if rule.Filename != "" {
+				return Agent{}, fmt.Errorf("agent %q kind %q: a drop-in file leaf must not set a fixed filename", sp.ID, kind)
+			}
+		case LeafFixed:
+			if rule.Filename == "" {
+				return Agent{}, fmt.Errorf("agent %q kind %q: a fixed leaf requires a filename", sp.ID, kind)
+			}
+			if rule.Ext != "" {
+				return Agent{}, fmt.Errorf("agent %q kind %q: a fixed leaf must not set an extension", sp.ID, kind)
 			}
 		default:
 			return Agent{}, fmt.Errorf("agent %q kind %q: invalid leaf shape", sp.ID, kind)
@@ -340,14 +375,17 @@ func NewSet(specs ...Spec) (Set, error) {
 // and pi.dev also reads ~/.pi/agent/skills; we install to the shared dir on
 // purpose, to stay on the cross-agent convention.
 //
-// Instructions (manifesto 18) are specified only for claude-code, which exposes
-// a drop-in directory of one file per instruction (~/.claude/rules/, tier 1).
-// Every other agent's user-scope instruction surface is a single fixed file
-// (codex-cli ~/.codex/AGENTS.md, opencode ~/.config/opencode/AGENTS.md, pi.dev
-// ~/.pi/agent/AGENTS.md, copilot-cli ~/.copilot/copilot-instructions.md), which
-// botfile cannot fan out into without clobbering a user-authored file; those are
-// reached by adoption (manifesto 50), not a distribution rule, so they are absent
-// here. copilot-vscode is pending vendor confirmation. See
+// Instructions (manifesto 18) are specified for every agent, in one of two
+// shapes. claude-code exposes a drop-in directory of one file per instruction
+// (~/.claude/rules/, LeafFile, tier 1), so botfile fans out one symlink per
+// instruction. The others read a single fixed file (codex-cli ~/.codex/AGENTS.md,
+// opencode ~/.config/opencode/AGENTS.md, pi.dev ~/.pi/agent/AGENTS.md, copilot-cli
+// ~/.copilot/copilot-instructions.md): a LeafFixed singleton on its own root
+// (slice 2's per-kind base). botfile installs into it like any other target and
+// never clobbers; where a user-authored file already sits there the reconcile
+// conflict rules (manifesto 35) report it and refuse to sync, and the user
+// reconciles it out of band (typically by adopting their file, 50). copilot-vscode
+// is pending vendor confirmation. See
 // callouts/instructions-are-one-kind-distribute-or-adopt.md.
 func Default() Set {
 	set, err := NewSet(
@@ -375,6 +413,15 @@ func Default() Set {
 			Base: Base{HomeRelative: []string{".agents"}},
 			Rules: map[core.Kind]InstallRule{
 				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
+				// codex reads one global instruction file at ~/.codex/AGENTS.md
+				// (CODEX_HOME relocates ~/.codex). A different root than its skills
+				// (slice 2), and a singleton: many source instructions cannot all land
+				// here, so precedence/conflict (manifesto 35) picks the one occupant.
+				// Source: developers.openai.com/codex/guides/agents-md.
+				core.KindInstruction: {
+					Tier: Tier2, Base: &Base{HomeRelative: []string{".codex"}, EnvOverride: "CODEX_HOME"},
+					Shape: LeafFixed, Filename: "AGENTS.md",
+				},
 			},
 		},
 		Spec{
@@ -389,6 +436,16 @@ func Default() Set {
 			Base: Base{HomeRelative: []string{".agents"}},
 			Rules: map[core.Kind]InstallRule{
 				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
+				// copilot-cli auto-loads one home instruction file,
+				// ~/.copilot/copilot-instructions.md (COPILOT_HOME relocates ~/.copilot).
+				// The ~/.copilot/instructions/ directory is not auto-loaded (it needs
+				// COPILOT_CUSTOM_INSTRUCTIONS_DIRS, the env-var registration this design
+				// retired), so the singleton file is the only conformant surface.
+				// Source: docs.github.com/copilot/.../copilot-cli/.../add-custom-instructions.
+				core.KindInstruction: {
+					Tier: Tier2, Base: &Base{HomeRelative: []string{".copilot"}, EnvOverride: "COPILOT_HOME"},
+					Shape: LeafFixed, Filename: "copilot-instructions.md",
+				},
 			},
 		},
 		Spec{
@@ -403,6 +460,14 @@ func Default() Set {
 			Base: Base{HomeRelative: []string{".agents"}},
 			Rules: map[core.Kind]InstallRule{
 				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
+				// opencode reads one global instruction file at
+				// ~/.config/opencode/AGENTS.md (it also falls back to ~/.claude/CLAUDE.md;
+				// we target its own canonical path). A singleton, like codex.
+				// Source: opencode.ai/docs/rules.
+				core.KindInstruction: {
+					Tier: Tier2, Base: &Base{HomeRelative: []string{".config", "opencode"}},
+					Shape: LeafFixed, Filename: "AGENTS.md",
+				},
 			},
 		},
 		Spec{
@@ -415,6 +480,13 @@ func Default() Set {
 			Base: Base{HomeRelative: []string{".agents"}},
 			Rules: map[core.Kind]InstallRule{
 				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
+				// pi.dev reads one global instruction file at ~/.pi/agent/AGENTS.md.
+				// A singleton, like codex.
+				// Source: github.com/badlogic/pi-mono coding-agent README.
+				core.KindInstruction: {
+					Tier: Tier2, Base: &Base{HomeRelative: []string{".pi", "agent"}},
+					Shape: LeafFixed, Filename: "AGENTS.md",
+				},
 			},
 		},
 	)

@@ -206,14 +206,15 @@ func TestSyncBlocksOnScanProblem(t *testing.T) {
 
 func TestSyncProceedsWhenOnlyUnsupported(t *testing.T) {
 	t.Parallel()
-	// A config that selects everything for claude and codex: codex instruction is
-	// unsupported (a projection problem) but that is expected partial coverage and
-	// must NOT block the clean installs.
+	// A config that selects everything for claude and copilot-vscode: copilot-vscode
+	// has no vendor spec yet, so every component for it is unsupported (a projection
+	// problem). That is expected partial coverage and must NOT block claude's clean
+	// installs.
 	cfg := core.Config{
 		Sources: []core.Source{{Name: "team", Location: "/src/team"}},
 		Selections: []core.Selection{{
 			SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
-			Agents: []core.AgentID{core.AgentClaudeCode, core.AgentCodexCLI},
+			Agents: []core.AgentID{core.AgentClaudeCode, core.AgentCopilotVSCode},
 		}},
 	}
 	scanned := project.Source{
@@ -245,7 +246,7 @@ func TestSyncProceedsWhenOnlyUnsupported(t *testing.T) {
 		}
 	}
 	if !foundUnsupported {
-		t.Fatal("expected the codex instruction unsupported problem to be recorded")
+		t.Fatal("expected the copilot-vscode unsupported problem to be recorded")
 	}
 }
 
