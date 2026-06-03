@@ -56,9 +56,12 @@ type FS interface {
 	// dir is fs.ErrNotExist so callers can skip an unmaterialized namespace.
 	ReadDir(dir string) ([]string, error)
 	// Rename moves the entry (file, directory, or symlink) at from to to. Both
-	// must be absolute. It is no-clobber: it errors with fs.ErrExist if to already
-	// exists (so it can never overwrite content), and errors if from does not
-	// exist.
+	// must be absolute, and from must exist. It refuses to overwrite: if it
+	// observes an existing entry at to it errors with fs.ErrExist. This is
+	// best-effort, not atomic, the check and the move are separate steps, so a
+	// concurrent writer could still race in. Callers preflight collisions instead
+	// of relying on atomicity: botfile's planner makes a "<kind>/<name>" already
+	// in the target source a typed problem before any effect runs.
 	Rename(from, to string) error
 }
 
@@ -134,11 +137,14 @@ func (OS) ReadDir(dir string) ([]string, error) {
 	return names, nil
 }
 
-// Rename implements FS over os.Rename, enforcing the no-clobber law: os.Rename
-// would replace an existing non-directory destination, so guard against it with
-// an Lstat first. There is a small TOCTOU window between the check and the
-// rename; a fully atomic no-replace would need renameat2/renamex_np, a future
-// refinement.
+// Rename implements FS over os.Rename with a best-effort no-clobber guard:
+// os.Rename would replace an existing non-directory destination, so refuse when
+// an Lstat sees an entry at to. The check and the move are not atomic (a small
+// TOCTOU window remains); botfile accepts this under the normal local-CLI
+// assumption, the same one Stow and Tuckr make, leaning on the planner's
+// collision preflight rather than a platform no-replace primitive (renameat2 /
+// renamex_np), which would add a syscall dependency and per-filesystem
+// fallbacks.
 func (OS) Rename(from, to string) error {
 	if !filepath.IsAbs(from) {
 		return notAbs(from)
