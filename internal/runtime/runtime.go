@@ -388,11 +388,10 @@ func managedDirs(cfg core.Config, agents agent.Set, roots map[core.AgentID]strin
 	return dirs
 }
 
-// managedNamespaces returns the (agent, kind, directory) namespaces to scan for
-// unmanaged components, one per directory: a directory shared by several agents
-// (for example ~/.agents/skills) is scanned once, attributed to the
-// lowest-sorted agent that reads it, since an unmanaged skill there is the same
-// component whichever agent finds it.
+// managedNamespaces returns the namespaces to scan for unmanaged components, one
+// per directory. A directory shared by several agents (for example
+// ~/.agents/skills) is scanned once but carries every agent that reads it, so a
+// component found there is attributed to all of them, not just one.
 func managedNamespaces(cfg core.Config, agents agent.Set, roots map[core.AgentID]string) []discover.Namespace {
 	usedSet := make(map[core.AgentID]bool)
 	for _, sel := range cfg.Selections {
@@ -406,7 +405,7 @@ func managedNamespaces(cfg core.Config, agents agent.Set, roots map[core.AgentID
 	}
 	sort.Slice(used, func(i, j int) bool { return used[i] < used[j] })
 
-	seenDir := make(map[string]bool)
+	byDir := make(map[string]int) // dir -> index into ns
 	var ns []discover.Namespace
 	for _, id := range used {
 		ag, ok := agents.Lookup(id)
@@ -415,12 +414,17 @@ func managedNamespaces(cfg core.Config, agents agent.Set, roots map[core.AgentID
 		}
 		for _, kind := range ag.SupportedKinds() {
 			dir, ok := ag.Namespace(roots[id], kind)
-			if !ok || seenDir[dir] {
+			if !ok {
 				continue
 			}
-			seenDir[dir] = true
-			ns = append(ns, discover.Namespace{Agent: id, Kind: kind, Dir: dir})
+			if i, exists := byDir[dir]; exists {
+				ns[i].Agents = append(ns[i].Agents, id)
+				continue
+			}
+			byDir[dir] = len(ns)
+			ns = append(ns, discover.Namespace{Agents: []core.AgentID{id}, Kind: kind, Dir: dir})
 		}
 	}
+	sort.Slice(ns, func(i, j int) bool { return ns[i].Dir < ns[j].Dir })
 	return ns
 }

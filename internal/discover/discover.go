@@ -21,19 +21,23 @@ import (
 	"codeberg.org/botfile/botfile/internal/source"
 )
 
-// Namespace is one (agent, kind) directory to scan for unmanaged components.
+// Namespace is one kind directory to scan for unmanaged components, with every
+// agent that reads it. A directory shared by several agents (for example
+// ~/.agents/skills) is one Namespace with several Agents, so it is scanned once
+// but its components are attributed to all of them.
 type Namespace struct {
-	Agent core.AgentID
-	Kind  core.Kind
-	Dir   string // absolute path, for example ~/.claude/skills
+	Agents []core.AgentID
+	Kind   core.Kind
+	Dir    string // absolute path, for example ~/.claude/skills
 }
 
-// Unmanaged is an adoptable component found in an agent's namespace.
+// Unmanaged is an adoptable component found in an agent namespace, attributed to
+// every agent that reads the directory it was found in.
 type Unmanaged struct {
-	Agent core.AgentID
-	Kind  core.Kind
-	Name  string
-	Path  string // absolute path of the component in the agent namespace
+	Agents []core.AgentID
+	Kind   core.Kind
+	Name   string
+	Path   string // absolute path of the component in the agent namespace
 }
 
 // Ref renders the component as "<kind>/<name>".
@@ -84,7 +88,7 @@ func classify(fsys fsport.FS, ns Namespace, name, path string, entry fsport.Entr
 		if core.ValidateName("skill name", name) != nil {
 			return Unmanaged{}, false
 		}
-		return Unmanaged{Agent: ns.Agent, Kind: core.KindSkill, Name: name, Path: path}, true
+		return Unmanaged{Agents: ns.Agents, Kind: core.KindSkill, Name: name, Path: path}, true
 
 	case core.KindMemory:
 		if !entry.IsRegular {
@@ -94,7 +98,7 @@ func classify(fsys fsport.FS, ns Namespace, name, path string, entry fsport.Entr
 		if !ok || core.ValidateName("memory name", mname) != nil {
 			return Unmanaged{}, false
 		}
-		return Unmanaged{Agent: ns.Agent, Kind: core.KindMemory, Name: mname, Path: path}, true
+		return Unmanaged{Agents: ns.Agents, Kind: core.KindMemory, Name: mname, Path: path}, true
 
 	default:
 		return Unmanaged{}, false

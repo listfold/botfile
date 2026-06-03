@@ -38,8 +38,8 @@ func TestFindUnmanagedSkillsAndMemories(t *testing.T) {
 	fsys.AddFile(rules + "/notes.txt")
 
 	got, err := Find(fsys, []Namespace{
-		{Agent: core.AgentClaudeCode, Kind: core.KindSkill, Dir: skills},
-		{Agent: core.AgentClaudeCode, Kind: core.KindMemory, Dir: rules},
+		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Dir: skills},
+		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindMemory, Dir: rules},
 	})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
@@ -53,8 +53,8 @@ func TestFindUnmanagedSkillsAndMemories(t *testing.T) {
 		if u.Ref() != want[i] {
 			t.Errorf("found[%d] = %s, want %s", i, u.Ref(), want[i])
 		}
-		if u.Agent != core.AgentClaudeCode {
-			t.Errorf("found[%d] agent = %s, want claude-code", i, u.Agent)
+		if len(u.Agents) != 1 || u.Agents[0] != core.AgentClaudeCode {
+			t.Errorf("found[%d] agents = %v, want [claude-code]", i, u.Agents)
 		}
 	}
 }
@@ -75,8 +75,8 @@ func TestFindRejectsNonRegularFiles(t *testing.T) {
 	fsys.AddSpecial(rules + "/special.md")
 
 	got, err := Find(fsys, []Namespace{
-		{Agent: core.AgentClaudeCode, Kind: core.KindSkill, Dir: skills},
-		{Agent: core.AgentClaudeCode, Kind: core.KindMemory, Dir: rules},
+		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Dir: skills},
+		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindMemory, Dir: rules},
 	})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
@@ -89,7 +89,7 @@ func TestFindRejectsNonRegularFiles(t *testing.T) {
 func TestFindSkipsMissingNamespace(t *testing.T) {
 	t.Parallel()
 	fsys := fsport.NewMem()
-	got, err := Find(fsys, []Namespace{{Agent: core.AgentClaudeCode, Kind: core.KindSkill, Dir: "/nope"}})
+	got, err := Find(fsys, []Namespace{{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Dir: "/nope"}})
 	if err != nil {
 		t.Fatalf("a missing namespace must be skipped, got %v", err)
 	}

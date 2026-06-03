@@ -85,15 +85,20 @@ func TestRenderStatus(t *testing.T) {
 	m := runtime.Model{
 		Mode:  runtime.ModeStatus,
 		Phase: runtime.PhaseDone,
-		Projection: project.Result{Links: []reconcile.LinkSpec{
-			{Target: "/h/.claude/skills/managed", Dest: "/s/managed", SourceName: "team"},
-			{Target: "/h/.claude/skills/missing", Dest: "/s/missing", SourceName: "team"},
-		}},
+		Projection: project.Result{
+			Links: []reconcile.LinkSpec{
+				{Target: "/h/.claude/skills/managed", Dest: "/s/managed", SourceName: "team"},
+				{Target: "/h/.claude/skills/missing", Dest: "/s/missing", SourceName: "team"},
+			},
+			Notices:  []project.Notice{{Selected: []core.AgentID{"copilot-cli"}, AlsoReaches: []core.AgentID{"codex-cli"}, Namespace: "/h/.agents/skills"}},
+			Problems: []project.Problem{{Kind: project.ProblemUnsupported, Agent: "codex-cli", Component: "memory/x", Detail: "no memory support"}},
+		},
 		Plan: reconcile.Plan{
-			Ops: []reconcile.Op{{Kind: reconcile.OpCreate, Target: "/h/.claude/skills/missing", Dest: "/s/missing"}},
+			Ops:     []reconcile.Op{{Kind: reconcile.OpCreate, Target: "/h/.claude/skills/missing", Dest: "/s/missing"}},
+			Shadows: []reconcile.Shadow{{Target: "/h/x", SourceName: "personal", WonBy: "team"}},
 		},
 		Unmanaged: []discover.Unmanaged{
-			{Agent: core.AgentClaudeCode, Kind: core.KindSkill, Name: "bark-pro", Path: "/h/.claude/skills/bark-pro"},
+			{Agents: []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI}, Kind: core.KindSkill, Name: "bark-pro", Path: "/h/.agents/skills/bark-pro"},
 		},
 	}
 	var buf bytes.Buffer
@@ -101,8 +106,13 @@ func TestRenderStatus(t *testing.T) {
 		t.Fatalf("status exit = %d, want 0", code)
 	}
 	out := buf.String()
-	// "managed" is the link with no op; "missing" is out of sync; bark-pro adoptable.
-	for _, want := range []string{"managed (1)", "/h/.claude/skills/managed", "out of sync (1)", "create", "adoptable (1)", "skill/bark-pro", "1 managed, 1 out of sync, 1 adoptable"} {
+	for _, want := range []string{
+		"managed (1)", "/h/.claude/skills/managed", // managed = the no-op link
+		"out of sync (1)", "create", // missing = drift
+		"notes", "note", "shadowed", "skipped", "memory/x", // non-blocking outcomes are shown
+		"adoptable (1)", "skill/bark-pro", "codex-cli,copilot-cli", // both reading agents
+		"1 managed, 1 out of sync, 1 skipped, 1 adoptable", // skipped surfaced in the summary
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status output missing %q\n%s", want, out)
 		}

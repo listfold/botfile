@@ -10,9 +10,11 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
 	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/config"
+	"codeberg.org/botfile/botfile/internal/core"
 	"codeberg.org/botfile/botfile/internal/interp"
 	"codeberg.org/botfile/botfile/internal/project"
 	"codeberg.org/botfile/botfile/internal/reconcile"
@@ -188,15 +190,39 @@ func renderStatus(w io.Writer, m runtime.Model) int {
 		renderIssues(w, m)
 	}
 
+	// Non-blocking notes: shared-namespace notices, precedence shadows, and
+	// components skipped because an agent does not support them. Skipped is
+	// counted in the summary too, so a selection that cannot install is never
+	// hidden behind "0 out of sync".
+	skipped := 0
+	for _, p := range m.Projection.Problems {
+		if p.Kind == project.ProblemUnsupported {
+			skipped++
+		}
+	}
+	if notes := len(m.Projection.Notices) + len(m.Plan.Shadows) + skipped; notes > 0 {
+		fmt.Fprintf(w, "notes (%d)\n", notes)
+		renderInfo(w, m)
+	}
+
 	if len(m.Unmanaged) > 0 {
 		fmt.Fprintf(w, "adoptable (%d)\n", len(m.Unmanaged))
 		for _, u := range m.Unmanaged {
-			fmt.Fprintf(w, "  %-14s %-16s %s\n", u.Agent, u.Ref(), u.Path)
+			fmt.Fprintf(w, "  %-22s %-16s %s\n", joinAgents(u.Agents), u.Ref(), u.Path)
 		}
 	}
 
-	fmt.Fprintf(w, "\n%d managed, %d out of sync, %d adoptable\n", len(managed), outOfSync, len(m.Unmanaged))
+	fmt.Fprintf(w, "\n%d managed, %d out of sync, %d skipped, %d adoptable\n", len(managed), outOfSync, skipped, len(m.Unmanaged))
 	return 0
+}
+
+// joinAgents renders a list of agent IDs as a comma-separated string.
+func joinAgents(ids []core.AgentID) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = string(id)
+	}
+	return strings.Join(parts, ",")
 }
 
 // changingTargets is the set of target paths a sync would touch (an op) or that

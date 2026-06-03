@@ -296,7 +296,7 @@ func TestStatusRunDiscoversThenDone(t *testing.T) {
 		t.Fatalf("namespaces = %+v, want claude skills + rules", disc.Namespaces)
 	}
 
-	found := []discover.Unmanaged{{Agent: core.AgentClaudeCode, Kind: core.KindSkill, Name: "bark-pro", Path: "/home/u/.claude/skills/bark-pro"}}
+	found := []discover.Unmanaged{{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Name: "bark-pro", Path: "/home/u/.claude/skills/bark-pro"}}
 	m, cmd = Update(m, Discovered{Unmanaged: found})
 	if _, ok := cmd.(CmdNone); !ok || m.Phase != PhaseDone {
 		t.Fatalf("status end = phase %v cmd %T, want Done + CmdNone", m.Phase, cmd)
@@ -320,14 +320,20 @@ func TestManagedNamespacesDedupesSharedDir(t *testing.T) {
 	roots := agents.ResolveRoots("/home/u", noEnv)
 	ns := managedNamespaces(cfg, agents, roots)
 
+	var shared *discover.Namespace
 	count := 0
-	for _, n := range ns {
-		if n.Dir == "/home/u/.agents/skills" {
+	for i := range ns {
+		if ns[i].Dir == "/home/u/.agents/skills" {
 			count++
+			shared = &ns[i]
 		}
 	}
 	if count != 1 {
 		t.Fatalf("~/.agents/skills appears %d times, want 1: %+v", count, ns)
+	}
+	// Deduped to one namespace, but both readers preserved.
+	if len(shared.Agents) != 2 || shared.Agents[0] != core.AgentCodexCLI || shared.Agents[1] != core.AgentCopilotCLI {
+		t.Fatalf("shared dir agents = %v, want [codex-cli copilot-cli]", shared.Agents)
 	}
 }
 
