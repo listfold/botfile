@@ -214,9 +214,9 @@ func TestEndToEndAdoptSingletonInstruction(t *testing.T) {
 		t.Fatalf("phase = %v (err %v, stage %q, problem %+v)", final.Phase, final.Err, final.FailedStage, final.AdoptProblem)
 	}
 
-	// The instruction moved into the source (named for the fixed file, AGENTS),
+	// The instruction moved into the source (named for its agent, codex-cli),
 	// content preserved.
-	moved := filepath.Join(src, "mine", "instructions", "AGENTS.md")
+	moved := filepath.Join(src, "mine", "instructions", "codex-cli.md")
 	if e, _ := (fsport.OS{}).Lstat(moved); !e.IsRegular {
 		t.Fatalf("instruction was not moved into the source at %s", moved)
 	}
@@ -238,7 +238,7 @@ func TestEndToEndAdoptSingletonInstruction(t *testing.T) {
 	}
 	found := false
 	for _, sel := range cfg.Selections {
-		if sel.SourceName == "personal" && sel.PluginName == "mine" && sel.ComponentID == "instruction/AGENTS" &&
+		if sel.SourceName == "personal" && sel.PluginName == "mine" && sel.ComponentID == "instruction/codex-cli" &&
 			len(sel.Agents) == 1 && sel.Agents[0] == core.AgentCodexCLI {
 			found = true
 		}
@@ -257,6 +257,60 @@ func TestEndToEndAdoptSingletonInstruction(t *testing.T) {
 	}
 	if len(sfinal.Plan.Ops) != 0 {
 		t.Fatalf("post-adopt sync must be a no-op, got %+v", sfinal.Plan.Ops)
+	}
+}
+
+func TestEndToEndAdoptMultipleSingletonsSamePlugin(t *testing.T) {
+	// Several agents on one device each have an AGENTS.md. Because a singleton is
+	// named for its agent, not its filename, all of them adopt into the same plugin
+	// without colliding (codex-cli.md, opencode.md), each with its own selection.
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src", "personal")
+	home := filepath.Join(tmp, "home")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(home, ".codex", "AGENTS.md"), "codex rules")
+	writeFile(t, filepath.Join(home, ".config", "opencode", "AGENTS.md"), "opencode rules")
+
+	configPath := filepath.Join(tmp, "config.toml")
+	writeFile(t, configPath, "[[sources]]\nname = \"personal\"\nlocation = \""+src+"\"\n")
+
+	agents := agent.Default()
+	roots := agents.ResolveRoots(home, func(string) string { return "" })
+
+	adoptOne := func(path string) {
+		t.Helper()
+		model, cmd := runtime.Init(runtime.ModeAdopt, configPath, home, agents, roots)
+		model.Adopt = adopt.Request{Path: path, SourceName: "personal", PluginName: "mine"}
+		final := OSDeps(home).Run(model, cmd)
+		if final.Phase != runtime.PhaseDone {
+			t.Fatalf("adopt %s: phase %v problem %+v", path, final.Phase, final.AdoptProblem)
+		}
+	}
+	adoptOne(filepath.Join(home, ".codex", "AGENTS.md"))
+	adoptOne(filepath.Join(home, ".config", "opencode", "AGENTS.md")) // must not collide
+
+	for _, leaf := range []string{"codex-cli.md", "opencode.md"} {
+		if e, _ := (fsport.OS{}).Lstat(filepath.Join(src, "mine", "instructions", leaf)); !e.IsRegular {
+			t.Errorf("expected source instruction %s after adopting both singletons", leaf)
+		}
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]core.AgentID{"instruction/codex-cli": core.AgentCodexCLI, "instruction/opencode": core.AgentOpenCode}
+	got := map[string]core.AgentID{}
+	for _, sel := range cfg.Selections {
+		if len(sel.Agents) == 1 {
+			got[sel.ComponentID] = sel.Agents[0]
+		}
+	}
+	for id, ag := range want {
+		if got[id] != ag {
+			t.Errorf("selection %s = %v, want %v (selections: %+v)", id, got[id], ag, cfg.Selections)
+		}
 	}
 }
 
@@ -285,7 +339,7 @@ func TestEndToEndStatusFindsSingletonInstruction(t *testing.T) {
 	if final.Phase != runtime.PhaseDone {
 		t.Fatalf("status: phase %v err %v stage %q", final.Phase, final.Err, final.FailedStage)
 	}
-	if len(final.Unmanaged) != 1 || final.Unmanaged[0].Ref() != "instruction/AGENTS" ||
+	if len(final.Unmanaged) != 1 || final.Unmanaged[0].Ref() != "instruction/codex-cli" ||
 		final.Unmanaged[0].Path != filepath.Join(home, ".codex", "AGENTS.md") {
 		t.Fatalf("unmanaged = %+v, want only the codex AGENTS.md singleton", final.Unmanaged)
 	}

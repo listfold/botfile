@@ -27,8 +27,8 @@ func TestFindFixedFileConsidersOnlyTheSingleton(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
-	if len(got) != 1 || got[0].Path != dir+"/AGENTS.md" || got[0].Ref() != "instruction/AGENTS" {
-		t.Fatalf("found = %+v, want only instruction/AGENTS at the singleton path", got)
+	if len(got) != 1 || got[0].Path != dir+"/AGENTS.md" || got[0].Ref() != "instruction/codex-cli" {
+		t.Fatalf("found = %+v, want only instruction/codex-cli (named for its agent) at the singleton path", got)
 	}
 }
 

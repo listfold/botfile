@@ -107,6 +107,17 @@ func classify(fsys fsport.FS, ns Namespace, name, path string, entry fsport.Entr
 		if !entry.IsRegular {
 			return Unmanaged{}, false // an instruction is a regular file (manifesto 48)
 		}
+		// A singleton (fixed-file) instruction takes its identity from its agent,
+		// not its filename: every agent's file is named the same (AGENTS.md), so the
+		// filename does not distinguish them and naming several "AGENTS" would
+		// collide when adopted into one plugin. The agent is the distinguishing,
+		// stable name (~/.codex/AGENTS.md -> instruction/codex-cli).
+		if ns.File != "" {
+			if len(ns.Agents) == 0 {
+				return Unmanaged{}, false
+			}
+			return Unmanaged{Agents: ns.Agents, Kind: core.KindInstruction, Name: string(ns.Agents[0]), Path: path}, true
+		}
 		iname, ok := source.InstructionName(name)
 		if !ok || core.ValidateName("instruction name", iname) != nil {
 			return Unmanaged{}, false
