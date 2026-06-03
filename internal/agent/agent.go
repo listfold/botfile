@@ -23,6 +23,7 @@ package agent
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 
 	"codeberg.org/botfile/botfile/internal/core"
 )
@@ -91,6 +92,16 @@ func (a Agent) ID() core.AgentID { return a.id }
 func (a Agent) Supports(kind core.Kind) bool {
 	_, ok := a.rules[kind]
 	return ok
+}
+
+// SupportedKinds returns the agent's supported kinds, sorted for determinism.
+func (a Agent) SupportedKinds() []core.Kind {
+	kinds := make([]core.Kind, 0, len(a.rules))
+	for k := range a.rules {
+		kinds = append(kinds, k)
+	}
+	sort.Slice(kinds, func(i, j int) bool { return kinds[i] < kinds[j] })
+	return kinds
 }
 
 // Root resolves the agent's config root under home, consulting getenv for the
