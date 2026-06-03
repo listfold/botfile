@@ -23,6 +23,7 @@ import (
 
 	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/core"
+	"codeberg.org/botfile/botfile/internal/discover"
 	"codeberg.org/botfile/botfile/internal/project"
 	"codeberg.org/botfile/botfile/internal/reconcile"
 	"codeberg.org/botfile/botfile/internal/source"
@@ -34,6 +35,7 @@ type Mode int
 const (
 	ModePlan Mode = iota
 	ModeSync
+	ModeStatus
 )
 
 // Phase is where the run is in its lifecycle.
@@ -43,6 +45,7 @@ const (
 	PhaseLoadingConfig Phase = iota
 	PhaseScanning
 	PhaseReadingWorld
+	PhaseDiscovering
 	PhaseApplying
 	PhaseDone
 	// PhaseBlocked is terminal: the reducer refused to apply because the plan was
@@ -124,6 +127,7 @@ type Model struct {
 	Projection   project.Result
 	Plan         reconcile.Plan
 	Blockers     []Blocker
+	Unmanaged    []discover.Unmanaged
 	Err          error
 	FailedStage  string
 }
@@ -143,6 +147,10 @@ type SourcesScanned struct {
 // WorldRead delivers the observed filesystem state.
 type WorldRead struct{ World reconcile.World }
 
+// Discovered delivers the unmanaged, adoptable components found in the agents'
+// namespaces (status mode).
+type Discovered struct{ Unmanaged []discover.Unmanaged }
+
 // Applied signals that the plan's operations were applied successfully.
 type Applied struct{}
 
@@ -155,6 +163,7 @@ type Failed struct {
 func (ConfigLoaded) isMsg()   {}
 func (SourcesScanned) isMsg() {}
 func (WorldRead) isMsg()      {}
+func (Discovered) isMsg()     {}
 func (Applied) isMsg()        {}
 func (Failed) isMsg()         {}
 
@@ -185,11 +194,15 @@ type CmdReadWorld struct {
 // CmdApply asks the interpreter to apply Ops through the filesystem port.
 type CmdApply struct{ Ops []reconcile.Op }
 
+// CmdDiscover asks the interpreter to scan Namespaces for unmanaged components.
+type CmdDiscover struct{ Namespaces []discover.Namespace }
+
 func (CmdNone) isCmd()        {}
 func (CmdLoadConfig) isCmd()  {}
 func (CmdScanSources) isCmd() {}
 func (CmdReadWorld) isCmd()   {}
 func (CmdApply) isCmd()       {}
+func (CmdDiscover) isCmd()    {}
 
 // Init builds the starting Model and first Cmd. The interpreter passes the
 // values it resolved from the environment so Update stays pure.
@@ -250,16 +263,29 @@ func Update(m Model, msg Msg) (Model, Cmd) {
 			// Pure: compute the plan, then the blockers that decide whether to apply.
 			m.Plan = reconcile.Reconcile(m.Projection.Links, wr.World, reconcileOpts(m.Sources))
 			m.Blockers = blockers(m)
-			if m.Mode == ModePlan {
+			switch m.Mode {
+			case ModeStatus:
+				// Read-only overview: also find the unmanaged, adoptable components.
+				m.Phase = PhaseDiscovering
+				return m, CmdDiscover{Namespaces: managedNamespaces(m.Config, m.Agents, m.Roots)}
+			case ModePlan:
 				m.Phase = PhaseDone // read-only: report the plan and its blockers
 				return m, CmdNone{}
+			default: // ModeSync
+				if len(m.Blockers) > 0 {
+					m.Phase = PhaseBlocked // refuse to apply a broken or blocked plan
+					return m, CmdNone{}
+				}
+				m.Phase = PhaseApplying
+				return m, CmdApply{Ops: m.Plan.Ops}
 			}
-			if len(m.Blockers) > 0 {
-				m.Phase = PhaseBlocked // refuse to apply a broken or blocked plan
-				return m, CmdNone{}
-			}
-			m.Phase = PhaseApplying
-			return m, CmdApply{Ops: m.Plan.Ops}
+		}
+
+	case PhaseDiscovering:
+		if d, ok := msg.(Discovered); ok {
+			m.Unmanaged = d.Unmanaged
+			m.Phase = PhaseDone
+			return m, CmdNone{}
 		}
 
 	case PhaseApplying:
@@ -360,4 +386,41 @@ func managedDirs(cfg core.Config, agents agent.Set, roots map[core.AgentID]strin
 	}
 	sort.Strings(dirs)
 	return dirs
+}
+
+// managedNamespaces returns the (agent, kind, directory) namespaces to scan for
+// unmanaged components, one per directory: a directory shared by several agents
+// (for example ~/.agents/skills) is scanned once, attributed to the
+// lowest-sorted agent that reads it, since an unmanaged skill there is the same
+// component whichever agent finds it.
+func managedNamespaces(cfg core.Config, agents agent.Set, roots map[core.AgentID]string) []discover.Namespace {
+	usedSet := make(map[core.AgentID]bool)
+	for _, sel := range cfg.Selections {
+		for _, a := range sel.Agents {
+			usedSet[a] = true
+		}
+	}
+	used := make([]core.AgentID, 0, len(usedSet))
+	for id := range usedSet {
+		used = append(used, id)
+	}
+	sort.Slice(used, func(i, j int) bool { return used[i] < used[j] })
+
+	seenDir := make(map[string]bool)
+	var ns []discover.Namespace
+	for _, id := range used {
+		ag, ok := agents.Lookup(id)
+		if !ok {
+			continue
+		}
+		for _, kind := range ag.SupportedKinds() {
+			dir, ok := ag.Namespace(roots[id], kind)
+			if !ok || seenDir[dir] {
+				continue
+			}
+			seenDir[dir] = true
+			ns = append(ns, discover.Namespace{Agent: id, Kind: kind, Dir: dir})
+		}
+	}
+	return ns
 }

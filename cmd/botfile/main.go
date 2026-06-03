@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 
 	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/config"
@@ -39,6 +40,8 @@ func run(args []string) int {
 		mode = runtime.ModePlan
 	case "sync":
 		mode = runtime.ModeSync
+	case "status":
+		mode = runtime.ModeStatus
 	case "-h", "--help", "help":
 		usage()
 		return 0
@@ -74,6 +77,7 @@ func usage() {
 usage:
   botfile plan    show what a sync would change, without touching anything
   botfile sync    reconcile your agents to match your config
+  botfile status  show what is managed, out of sync, and adoptable
 `)
 }
 
@@ -85,6 +89,9 @@ func render(w io.Writer, m runtime.Model) int {
 	if m.Phase == runtime.PhaseFailed {
 		fmt.Fprintf(w, "failed during %s: %v\n", m.FailedStage, m.Err)
 		return 2
+	}
+	if m.Mode == runtime.ModeStatus {
+		return renderStatus(w, m)
 	}
 
 	renderOps(w, m)
@@ -149,4 +156,62 @@ func renderIssues(w io.Writer, m runtime.Model) {
 	for _, b := range m.Blockers {
 		fmt.Fprintf(w, "  ! %-18s %s: %s\n", b.Kind, b.Ref, b.Detail)
 	}
+}
+
+// renderStatus shows the current state overview: what botfile manages and has in
+// place, what is out of sync (a sync would change or is blocked), and what is
+// unmanaged and adoptable. It is read-only and always exits 0.
+func renderStatus(w io.Writer, m runtime.Model) int {
+	changing := changingTargets(m.Plan)
+	seen := make(map[string]bool)
+	var managed []string
+	for _, l := range m.Projection.Links {
+		if changing[l.Target] || seen[l.Target] {
+			continue
+		}
+		seen[l.Target] = true
+		managed = append(managed, l.Target)
+	}
+	sort.Strings(managed)
+
+	if len(managed) > 0 {
+		fmt.Fprintf(w, "managed (%d)\n", len(managed))
+		for _, t := range managed {
+			fmt.Fprintf(w, "  %s\n", t)
+		}
+	}
+
+	outOfSync := len(m.Plan.Ops) + len(m.Blockers)
+	if outOfSync > 0 {
+		fmt.Fprintf(w, "out of sync (%d)\n", outOfSync)
+		renderOps(w, m)
+		renderIssues(w, m)
+	}
+
+	if len(m.Unmanaged) > 0 {
+		fmt.Fprintf(w, "adoptable (%d)\n", len(m.Unmanaged))
+		for _, u := range m.Unmanaged {
+			fmt.Fprintf(w, "  %-14s %-16s %s\n", u.Agent, u.Ref(), u.Path)
+		}
+	}
+
+	fmt.Fprintf(w, "\n%d managed, %d out of sync, %d adoptable\n", len(managed), outOfSync, len(m.Unmanaged))
+	return 0
+}
+
+// changingTargets is the set of target paths a sync would touch (an op) or that
+// are blocked (a conflict or plan problem), so status can tell what is correctly
+// in place from what is not.
+func changingTargets(p reconcile.Plan) map[string]bool {
+	s := make(map[string]bool)
+	for _, op := range p.Ops {
+		s[op.Target] = true
+	}
+	for _, c := range p.Conflicts {
+		s[c.Target] = true
+	}
+	for _, pr := range p.Problems {
+		s[pr.Target] = true
+	}
+	return s
 }

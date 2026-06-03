@@ -6,6 +6,7 @@ import (
 
 	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/core"
+	"codeberg.org/botfile/botfile/internal/discover"
 	"codeberg.org/botfile/botfile/internal/project"
 	"codeberg.org/botfile/botfile/internal/reconcile"
 	"codeberg.org/botfile/botfile/internal/source"
@@ -274,6 +275,59 @@ func TestOutOfOrderMessageIsIgnored(t *testing.T) {
 	got, cmd := Update(m, Applied{})
 	if got.Phase != PhaseScanning {
 		t.Fatalf("stale Applied advanced Scanning to %v (cmd %T)", got.Phase, cmd)
+	}
+}
+
+func TestStatusRunDiscoversThenDone(t *testing.T) {
+	t.Parallel()
+	m, _ := newModel(t, ModeStatus)
+	m, _ = Update(m, ConfigLoaded{Config: testConfig()})
+	m, _ = Update(m, SourcesScanned{Sources: []project.Source{scannedTeam()}})
+
+	// After reconcile, status mode asks the interpreter to discover unmanaged
+	// components rather than applying.
+	m, cmd := Update(m, WorldRead{World: reconcile.World{Entries: map[string]reconcile.Entry{}}})
+	disc, ok := cmd.(CmdDiscover)
+	if !ok || m.Phase != PhaseDiscovering {
+		t.Fatalf("status after WorldRead = phase %v cmd %T, want Discovering + CmdDiscover", m.Phase, cmd)
+	}
+	// claude-code is the only targeted agent: skills and rules namespaces.
+	if len(disc.Namespaces) != 2 {
+		t.Fatalf("namespaces = %+v, want claude skills + rules", disc.Namespaces)
+	}
+
+	found := []discover.Unmanaged{{Agent: core.AgentClaudeCode, Kind: core.KindSkill, Name: "bark-pro", Path: "/home/u/.claude/skills/bark-pro"}}
+	m, cmd = Update(m, Discovered{Unmanaged: found})
+	if _, ok := cmd.(CmdNone); !ok || m.Phase != PhaseDone {
+		t.Fatalf("status end = phase %v cmd %T, want Done + CmdNone", m.Phase, cmd)
+	}
+	if len(m.Unmanaged) != 1 || m.Unmanaged[0].Name != "bark-pro" {
+		t.Fatalf("unmanaged = %+v, want bark-pro", m.Unmanaged)
+	}
+}
+
+func TestManagedNamespacesDedupesSharedDir(t *testing.T) {
+	t.Parallel()
+	// codex and copilot both read ~/.agents/skills; it must appear once.
+	cfg := core.Config{
+		Sources: []core.Source{{Name: "team", Location: "/src/team"}},
+		Selections: []core.Selection{{
+			SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
+			Agents: []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI},
+		}},
+	}
+	agents := agent.Default()
+	roots := agents.ResolveRoots("/home/u", noEnv)
+	ns := managedNamespaces(cfg, agents, roots)
+
+	count := 0
+	for _, n := range ns {
+		if n.Dir == "/home/u/.agents/skills" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("~/.agents/skills appears %d times, want 1: %+v", count, ns)
 	}
 }
 

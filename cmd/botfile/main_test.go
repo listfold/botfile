@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"codeberg.org/botfile/botfile/internal/core"
+	"codeberg.org/botfile/botfile/internal/discover"
 	"codeberg.org/botfile/botfile/internal/project"
 	"codeberg.org/botfile/botfile/internal/reconcile"
 	"codeberg.org/botfile/botfile/internal/runtime"
@@ -77,6 +78,37 @@ func TestRenderPlanWithBlockersDoesNotInviteSync(t *testing.T) {
 	}
 	if !strings.Contains(out, "would block sync") {
 		t.Errorf("plan with blockers should say it would block:\n%s", out)
+	}
+}
+
+func TestRenderStatus(t *testing.T) {
+	m := runtime.Model{
+		Mode:  runtime.ModeStatus,
+		Phase: runtime.PhaseDone,
+		Projection: project.Result{Links: []reconcile.LinkSpec{
+			{Target: "/h/.claude/skills/managed", Dest: "/s/managed", SourceName: "team"},
+			{Target: "/h/.claude/skills/missing", Dest: "/s/missing", SourceName: "team"},
+		}},
+		Plan: reconcile.Plan{
+			Ops: []reconcile.Op{{Kind: reconcile.OpCreate, Target: "/h/.claude/skills/missing", Dest: "/s/missing"}},
+		},
+		Unmanaged: []discover.Unmanaged{
+			{Agent: core.AgentClaudeCode, Kind: core.KindSkill, Name: "bark-pro", Path: "/h/.claude/skills/bark-pro"},
+		},
+	}
+	var buf bytes.Buffer
+	if code := render(&buf, m); code != 0 {
+		t.Fatalf("status exit = %d, want 0", code)
+	}
+	out := buf.String()
+	// "managed" is the link with no op; "missing" is out of sync; bark-pro adoptable.
+	for _, want := range []string{"managed (1)", "/h/.claude/skills/managed", "out of sync (1)", "create", "adoptable (1)", "skill/bark-pro", "1 managed, 1 out of sync, 1 adoptable"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status output missing %q\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "managed\n  /h/.claude/skills/missing") {
+		t.Errorf("a drifting link must not be listed as managed\n%s", out)
 	}
 }
 

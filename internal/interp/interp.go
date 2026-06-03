@@ -20,6 +20,7 @@ import (
 	"codeberg.org/botfile/botfile/internal/apply"
 	"codeberg.org/botfile/botfile/internal/config"
 	"codeberg.org/botfile/botfile/internal/core"
+	"codeberg.org/botfile/botfile/internal/discover"
 	"codeberg.org/botfile/botfile/internal/fsport"
 	"codeberg.org/botfile/botfile/internal/project"
 	"codeberg.org/botfile/botfile/internal/runtime"
@@ -164,6 +165,13 @@ func (d Deps) perform(cmd runtime.Cmd) runtime.Msg {
 			return runtime.Failed{Stage: "apply", Err: err}
 		}
 		return runtime.Applied{}
+
+	case runtime.CmdDiscover:
+		found, err := discover.Find(d.FS, c.Namespaces)
+		if err != nil {
+			return runtime.Failed{Stage: "discover", Err: err}
+		}
+		return runtime.Discovered{Unmanaged: found}
 
 	default:
 		return runtime.Failed{Stage: "interp", Err: fmt.Errorf("unknown command %T", cmd)}

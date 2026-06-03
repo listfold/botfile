@@ -97,6 +97,36 @@ func TestEndToEndPlanTouchesNothing(t *testing.T) {
 	}
 }
 
+func TestEndToEndStatusFindsUnmanaged(t *testing.T) {
+	// After a sync installs the managed skill, an agent-created skill placed
+	// directly in ~/.claude/skills must show up as adoptable in status.
+	model, cmd, home := setup(t, runtime.ModeSync)
+	if final := OSDeps(home).Run(model, cmd); final.Phase != runtime.PhaseDone {
+		t.Fatalf("seed sync: phase %v err %v", final.Phase, final.Err)
+	}
+
+	// An agent writes a new skill in place.
+	writeFile(t, filepath.Join(home, ".claude", "skills", "bark-pro", "SKILL.md"), "woof woof")
+
+	sm, scmd := reinitStatus(t, home)
+	final := OSDeps(home).Run(sm, scmd)
+	if final.Phase != runtime.PhaseDone {
+		t.Fatalf("status: phase %v err %v stage %q", final.Phase, final.Err, final.FailedStage)
+	}
+	if len(final.Unmanaged) != 1 || final.Unmanaged[0].Name != "bark-pro" {
+		t.Fatalf("unmanaged = %+v, want the agent-created bark-pro", final.Unmanaged)
+	}
+}
+
+// reinitStatus builds a status run for the home/config produced by setup.
+func reinitStatus(t *testing.T, home string) (runtime.Model, runtime.Cmd) {
+	t.Helper()
+	configPath := filepath.Join(filepath.Dir(home), "config.toml")
+	agents := agent.Default()
+	roots := agents.ResolveRoots(home, func(string) string { return "" })
+	return runtime.Init(runtime.ModeStatus, configPath, home, agents, roots)
+}
+
 // reinit rebuilds the initial model+cmd reusing the prior run's seeded inputs, so
 // a second sync runs against the filesystem the first one produced.
 func reinit(t *testing.T, prev runtime.Model) (runtime.Model, runtime.Cmd, string) {
