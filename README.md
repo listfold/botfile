@@ -125,6 +125,14 @@ go test ./...
 
 On Windows, symlink creation requires Developer Mode.
 
+The repository ships a pre-commit hook that runs `gofmt`, `go vet`, `go build`,
+and `go test` before each commit (the same checks a CI job would). Enable it once
+per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
 ## Documentation
 
 - [docs/example-flow.md](docs/example-flow.md): a complete team + personal
