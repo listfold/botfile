@@ -8,6 +8,7 @@ import (
 	"codeberg.org/botfile/botfile/internal/adopt"
 	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/config"
+	"codeberg.org/botfile/botfile/internal/core"
 	"codeberg.org/botfile/botfile/internal/fsport"
 	"codeberg.org/botfile/botfile/internal/runtime"
 )
@@ -179,6 +180,114 @@ func TestEndToEndAdopt(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("config did not gain a selection for the adopted skill: %+v", cfg.Selections)
+	}
+}
+
+func TestEndToEndAdoptSingletonInstruction(t *testing.T) {
+	// Adopt a codex-cli singleton instruction (~/.codex/AGENTS.md, a fixed file on
+	// its own root). The generic adopt flow must move it into the source as a
+	// <name>.md, replace it with a back-symlink, and add a codex-cli selection so a
+	// later sync maintains it.
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src", "personal")
+	home := filepath.Join(tmp, "home")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The user's hand-written codex instruction file.
+	writeFile(t, filepath.Join(home, ".codex", "AGENTS.md"), "be terse and cite sources")
+	// An unrelated file in the same directory must be left untouched.
+	writeFile(t, filepath.Join(home, ".codex", "history.md"), "session log")
+
+	configPath := filepath.Join(tmp, "config.toml")
+	writeFile(t, configPath, "[[sources]]\nname = \"personal\"\nlocation = \""+src+"\"\n")
+
+	agents := agent.Default()
+	roots := agents.ResolveRoots(home, func(string) string { return "" })
+	model, cmd := runtime.Init(runtime.ModeAdopt, configPath, home, agents, roots)
+	model.Adopt = adopt.Request{
+		Path:       filepath.Join(home, ".codex", "AGENTS.md"),
+		SourceName: "personal", PluginName: "mine",
+	}
+	final := OSDeps(home).Run(model, cmd)
+	if final.Phase != runtime.PhaseDone {
+		t.Fatalf("phase = %v (err %v, stage %q, problem %+v)", final.Phase, final.Err, final.FailedStage, final.AdoptProblem)
+	}
+
+	// The instruction moved into the source (named for the fixed file, AGENTS),
+	// content preserved.
+	moved := filepath.Join(src, "mine", "instructions", "AGENTS.md")
+	if e, _ := (fsport.OS{}).Lstat(moved); !e.IsRegular {
+		t.Fatalf("instruction was not moved into the source at %s", moved)
+	}
+	if b, err := os.ReadFile(moved); err != nil || string(b) != "be terse and cite sources" {
+		t.Fatalf("moved instruction content = %q, err %v", b, err)
+	}
+	// The original path is now a symlink into the source.
+	if e, _ := (fsport.OS{}).Lstat(filepath.Join(home, ".codex", "AGENTS.md")); !e.IsSymlink {
+		t.Fatal("the original AGENTS.md was not replaced with a symlink")
+	}
+	// The unrelated sibling is untouched.
+	if e, _ := (fsport.OS{}).Lstat(filepath.Join(home, ".codex", "history.md")); !e.IsRegular {
+		t.Fatal("an unrelated sibling file must not be touched by adopt")
+	}
+	// The config gained a codex-cli selection for the adopted instruction.
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, sel := range cfg.Selections {
+		if sel.SourceName == "personal" && sel.PluginName == "mine" && sel.ComponentID == "instruction/AGENTS" &&
+			len(sel.Agents) == 1 && sel.Agents[0] == core.AgentCodexCLI {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("config did not gain a codex-cli selection for the adopted instruction: %+v", cfg.Selections)
+	}
+
+	// Round-trip: a sync now maintains the adopted singleton. The back-symlink
+	// already points at the source file, so the plan is empty (it propagates on a
+	// fresh machine, and is a no-op here).
+	sm, scmd := runtime.Init(runtime.ModeSync, configPath, home, agents, roots)
+	sfinal := OSDeps(home).Run(sm, scmd)
+	if sfinal.Phase != runtime.PhaseDone {
+		t.Fatalf("post-adopt sync: phase %v err %v blockers %+v", sfinal.Phase, sfinal.Err, sfinal.Blockers)
+	}
+	if len(sfinal.Plan.Ops) != 0 {
+		t.Fatalf("post-adopt sync must be a no-op, got %+v", sfinal.Plan.Ops)
+	}
+}
+
+func TestEndToEndStatusFindsSingletonInstruction(t *testing.T) {
+	// status surfaces an agent-authored singleton instruction as adoptable, by its
+	// fixed filename, without reporting unrelated files in the same directory.
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src", "personal")
+	home := filepath.Join(tmp, "home")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(home, ".codex", "AGENTS.md"), "global codex rules")
+	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "[settings]") // unrelated
+
+	// codex is named by a selection (skills), so status scans its namespaces.
+	configPath := filepath.Join(tmp, "config.toml")
+	writeFile(t, configPath, ""+
+		"[[sources]]\nname = \"personal\"\nlocation = \""+src+"\"\n\n"+
+		"[[selections]]\nsource = \"personal\"\ncomponent = \"skill/x\"\nagents = [\"codex-cli\"]\n")
+
+	agents := agent.Default()
+	roots := agents.ResolveRoots(home, func(string) string { return "" })
+	model, cmd := runtime.Init(runtime.ModeStatus, configPath, home, agents, roots)
+	final := OSDeps(home).Run(model, cmd)
+	if final.Phase != runtime.PhaseDone {
+		t.Fatalf("status: phase %v err %v stage %q", final.Phase, final.Err, final.FailedStage)
+	}
+	if len(final.Unmanaged) != 1 || final.Unmanaged[0].Ref() != "instruction/AGENTS" ||
+		final.Unmanaged[0].Path != filepath.Join(home, ".codex", "AGENTS.md") {
+		t.Fatalf("unmanaged = %+v, want only the codex AGENTS.md singleton", final.Unmanaged)
 	}
 }
 
