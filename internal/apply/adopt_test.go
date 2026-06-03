@@ -65,6 +65,34 @@ func TestAdoptRollsBackOnSelectionFailure(t *testing.T) {
 	}
 }
 
+func TestAdoptRollbackRemovesCreatedDirs(t *testing.T) {
+	t.Parallel()
+	fsys := fsport.NewMem()
+	from := "/home/u/.claude/skills/bark"
+	to := "/src/personal/mine/skills/bark"
+	seedSkill(t, fsys, from)
+	// A pre-existing ancestor that must survive rollback; the rest is created.
+	if err := fsys.MkdirAll("/src/personal"); err != nil {
+		t.Fatal(err)
+	}
+
+	addSel := func() (func() error, error) { return nil, errors.New("config locked") }
+	if err := Adopt(fsys, from, to, addSel); err == nil {
+		t.Fatal("Adopt should fail")
+	}
+
+	// The directories adopt created are gone...
+	for _, d := range []string{"/src/personal/mine/skills", "/src/personal/mine"} {
+		if e, _ := fsys.Lstat(d); e.Exists {
+			t.Errorf("created dir %s should be removed on rollback", d)
+		}
+	}
+	// ...but the pre-existing ancestor survives.
+	if e, _ := fsys.Lstat("/src/personal"); !e.IsDir {
+		t.Error("pre-existing ancestor /src/personal must be preserved")
+	}
+}
+
 func TestAdoptNilSelectionSkipsConfig(t *testing.T) {
 	t.Parallel()
 	fsys := fsport.NewMem()

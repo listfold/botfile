@@ -56,7 +56,9 @@ type FS interface {
 	// dir is fs.ErrNotExist so callers can skip an unmaterialized namespace.
 	ReadDir(dir string) ([]string, error)
 	// Rename moves the entry (file, directory, or symlink) at from to to. Both
-	// must be absolute. It errors if from does not exist.
+	// must be absolute. It is no-clobber: it errors with fs.ErrExist if to already
+	// exists (so it can never overwrite content), and errors if from does not
+	// exist.
 	Rename(from, to string) error
 }
 
@@ -132,13 +134,22 @@ func (OS) ReadDir(dir string) ([]string, error) {
 	return names, nil
 }
 
-// Rename implements FS over os.Rename.
+// Rename implements FS over os.Rename, enforcing the no-clobber law: os.Rename
+// would replace an existing non-directory destination, so guard against it with
+// an Lstat first. There is a small TOCTOU window between the check and the
+// rename; a fully atomic no-replace would need renameat2/renamex_np, a future
+// refinement.
 func (OS) Rename(from, to string) error {
 	if !filepath.IsAbs(from) {
 		return notAbs(from)
 	}
 	if !filepath.IsAbs(to) {
 		return notAbs(to)
+	}
+	if _, err := os.Lstat(to); err == nil {
+		return &fs.PathError{Op: "rename", Path: to, Err: fs.ErrExist}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
 	}
 	return os.Rename(from, to)
 }

@@ -176,6 +176,27 @@ func runConformance(t *testing.T, nb newBackend) {
 		}
 	})
 
+	t.Run("rename refuses to clobber an existing destination", func(t *testing.T) {
+		fsys, base := nb(t)
+		if err := fsys.MkdirAll(filepath.Join(base, "src")); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		occupied := filepath.Join(base, "occupied")
+		if err := fsys.Symlink(filepath.Join(base, "x"), occupied); err != nil {
+			t.Fatalf("Symlink: %v", err)
+		}
+		if err := fsys.Rename(filepath.Join(base, "src"), occupied); !errors.Is(err, fs.ErrExist) {
+			t.Fatalf("rename over existing = %v, want fs.ErrExist", err)
+		}
+		// Both paths are unchanged.
+		if e, _ := fsys.Lstat(filepath.Join(base, "src")); !e.IsDir {
+			t.Error("source was clobbered by a refused rename")
+		}
+		if e, _ := fsys.Lstat(occupied); !e.IsSymlink {
+			t.Error("destination was clobbered by a refused rename")
+		}
+	})
+
 	t.Run("relative paths are rejected", func(t *testing.T) {
 		fsys, _ := nb(t)
 		rel := "relative/path"
