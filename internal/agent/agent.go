@@ -482,7 +482,7 @@ func Default() Set {
 				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
 				// pi.dev reads one global instruction file at ~/.pi/agent/AGENTS.md.
 				// A singleton, like codex.
-				// Source: github.com/badlogic/pi-mono coding-agent README.
+				// Source: pi.dev/docs/latest (pi loads ~/.pi/agent/AGENTS.md globally).
 				core.KindInstruction: {
 					Tier: Tier2, Base: &Base{HomeRelative: []string{".pi", "agent"}},
 					Shape: LeafFixed, Filename: "AGENTS.md",
