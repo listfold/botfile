@@ -51,7 +51,7 @@ func setup(t *testing.T, mode runtime.Mode) (runtime.Model, runtime.Cmd, string)
 func TestEndToEndSyncCreatesSymlinks(t *testing.T) {
 	model, cmd, home := setup(t, runtime.ModeSync)
 
-	final := OSDeps().Run(model, cmd)
+	final := OSDeps(home).Run(model, cmd)
 	if final.Phase != runtime.PhaseDone {
 		t.Fatalf("phase = %v (err %v, stage %q), want Done", final.Phase, final.Err, final.FailedStage)
 	}
@@ -61,8 +61,8 @@ func TestEndToEndSyncCreatesSymlinks(t *testing.T) {
 }
 
 func TestEndToEndSyncIsIdempotent(t *testing.T) {
-	model, cmd, _ := setup(t, runtime.ModeSync)
-	final := OSDeps().Run(model, cmd)
+	model, cmd, home := setup(t, runtime.ModeSync)
+	final := OSDeps(home).Run(model, cmd)
 	if final.Phase != runtime.PhaseDone {
 		t.Fatalf("first sync: phase %v err %v", final.Phase, final.Err)
 	}
@@ -73,7 +73,7 @@ func TestEndToEndSyncIsIdempotent(t *testing.T) {
 	// Re-run against the now-populated home: the world already matches, so the
 	// second plan is empty.
 	model2, cmd2, _ := reinit(t, final)
-	final2 := OSDeps().Run(model2, cmd2)
+	final2 := OSDeps(home).Run(model2, cmd2)
 	if final2.Phase != runtime.PhaseDone {
 		t.Fatalf("second sync: phase %v err %v", final2.Phase, final2.Err)
 	}
@@ -84,7 +84,7 @@ func TestEndToEndSyncIsIdempotent(t *testing.T) {
 
 func TestEndToEndPlanTouchesNothing(t *testing.T) {
 	model, cmd, home := setup(t, runtime.ModePlan)
-	final := OSDeps().Run(model, cmd)
+	final := OSDeps(home).Run(model, cmd)
 	if final.Phase != runtime.PhaseDone {
 		t.Fatalf("plan: phase %v err %v", final.Phase, final.Err)
 	}
@@ -103,6 +103,70 @@ func reinit(t *testing.T, prev runtime.Model) (runtime.Model, runtime.Cmd, strin
 	t.Helper()
 	model, cmd := runtime.Init(prev.Mode, prev.ConfigPath, prev.Home, prev.Agents, prev.Roots)
 	return model, cmd, prev.Home
+}
+
+func TestResolveLocation(t *testing.T) {
+	t.Parallel()
+	d := Deps{Home: "/home/u"}
+
+	if got, prob := d.resolveLocation("/abs/team"); prob != nil || got != "/abs/team" {
+		t.Errorf("abs: got %q prob %v, want /abs/team", got, prob)
+	}
+	if got, prob := d.resolveLocation("~/team"); prob != nil || got != "/home/u/team" {
+		t.Errorf("tilde: got %q prob %v, want /home/u/team", got, prob)
+	}
+	if got, prob := d.resolveLocation("./team"); prob != nil || !filepath.IsAbs(got) {
+		t.Errorf("relative: got %q prob %v, want an absolute path", got, prob)
+	}
+	for _, url := range []string{"git@codeberg.org:botfile/team.git", "https://example.com/team.git", "ssh://host/team"} {
+		if _, prob := d.resolveLocation(url); prob == nil {
+			t.Errorf("remote %q: want an unsupported-source problem, got none", url)
+		}
+	}
+}
+
+func TestEndToEndSyncWithRelativeSourcePath(t *testing.T) {
+	// A relative source location must resolve to an absolute path and sync, not
+	// produce relative destinations the planner rejects as invalid-path.
+	model, cmd, home := setupRelative(t)
+	final := OSDeps(home).Run(model, cmd)
+	if final.Phase != runtime.PhaseDone {
+		t.Fatalf("phase = %v (err %v, stage %q, blockers %+v), want Done", final.Phase, final.Err, final.FailedStage, final.Blockers)
+	}
+	assertSymlink(t, filepath.Join(home, ".claude", "skills", "go-style"))
+}
+
+// setupRelative is like setup but writes the source location as a path relative
+// to the test's working directory, so resolveLocation must make it absolute.
+func setupRelative(t *testing.T) (runtime.Model, runtime.Cmd, string) {
+	t.Helper()
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src", "team")
+	home := filepath.Join(tmp, "home")
+	writeFile(t, filepath.Join(src, "coding", "skills", "go-style", "SKILL.md"), "# go style")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(cwd, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	configPath := filepath.Join(tmp, "config.toml")
+	writeFile(t, configPath, ""+
+		"[[sources]]\n"+
+		"name = \"team\"\n"+
+		"location = \""+rel+"\"\n\n"+
+		"[[selections]]\n"+
+		"source = \"team\"\n"+
+		"agents = [\"claude-code\"]\n")
+
+	agents := agent.Default()
+	roots := agents.ResolveRoots(home, func(string) string { return "" })
+	model, cmd := runtime.Init(runtime.ModeSync, configPath, home, agents, roots)
+	return model, cmd, home
 }
 
 func assertSymlink(t *testing.T, path string) {

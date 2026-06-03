@@ -7,11 +7,13 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/config"
 	"codeberg.org/botfile/botfile/internal/interp"
+	"codeberg.org/botfile/botfile/internal/project"
 	"codeberg.org/botfile/botfile/internal/reconcile"
 	"codeberg.org/botfile/botfile/internal/runtime"
 )
@@ -61,7 +63,7 @@ func run(args []string) int {
 	roots := agents.ResolveRoots(home, os.Getenv)
 
 	model, cmd := runtime.Init(mode, configPath, home, agents, roots)
-	model = interp.OSDeps().Run(model, cmd)
+	model = interp.OSDeps(home).Run(model, cmd)
 
 	return render(os.Stdout, model)
 }
@@ -75,22 +77,23 @@ usage:
 `)
 }
 
-// render writes a human-readable summary of the run and returns the exit code.
-func render(w *os.File, m runtime.Model) int {
-	switch m.Phase {
-	case runtime.PhaseFailed:
+// render writes a full summary of the run, mapping every outcome the model
+// preserves to a distinct line, and returns the exit code. An effect failure is
+// terminal and reported on its own; otherwise the operations, informational
+// outcomes, and blocking issues are each shown, then a summary line.
+func render(w io.Writer, m runtime.Model) int {
+	if m.Phase == runtime.PhaseFailed {
 		fmt.Fprintf(w, "failed during %s: %v\n", m.FailedStage, m.Err)
 		return 2
 	}
 
-	renderPlan(w, m)
+	renderOps(w, m)
+	renderInfo(w, m)
+	renderIssues(w, m)
 
 	switch m.Phase {
 	case runtime.PhaseBlocked:
-		fmt.Fprintf(w, "\nblocked: %d issue(s) must be resolved before sync\n", len(m.Blockers))
-		for _, b := range m.Blockers {
-			fmt.Fprintf(w, "  - %s\n", b.Detail)
-		}
+		fmt.Fprintf(w, "\nblocked: resolve the %d issue(s) above, then run `botfile sync`\n", len(m.Blockers))
 		return 1
 	case runtime.PhaseDone:
 		if m.Mode == runtime.ModeSync {
@@ -100,28 +103,43 @@ func render(w *os.File, m runtime.Model) int {
 		}
 		return 0
 	default:
-		// A non-terminal phase here means the loop exited early; treat as failure.
 		fmt.Fprintf(w, "incomplete run (phase %d)\n", m.Phase)
 		return 2
 	}
 }
 
-// renderPlan prints the plan's operations and the non-blocking outcomes.
-func renderPlan(w *os.File, m runtime.Model) {
+// renderOps lists the planned filesystem operations.
+func renderOps(w io.Writer, m runtime.Model) {
 	for _, op := range m.Plan.Ops {
 		if op.Kind == reconcile.OpRemove {
-			fmt.Fprintf(w, "  remove  %s\n", op.Target)
+			fmt.Fprintf(w, "  remove   %s\n", op.Target)
 		} else {
-			fmt.Fprintf(w, "  %-7s %s -> %s\n", op.Kind, op.Target, op.Dest)
+			fmt.Fprintf(w, "  %-8s %s -> %s\n", op.Kind, op.Target, op.Dest)
 		}
 	}
-	for _, c := range m.Plan.Conflicts {
-		fmt.Fprintf(w, "  conflict %s (%s)\n", c.Target, c.Reason)
+}
+
+// renderInfo shows non-blocking outcomes: shared-namespace notices, precedence
+// shadows, and components skipped because an agent does not support them
+// (expected partial coverage, the one projection problem that does not block).
+func renderInfo(w io.Writer, m runtime.Model) {
+	for _, n := range m.Projection.Notices {
+		fmt.Fprintf(w, "  note     skills for %v also reach %v via %s\n", n.Selected, n.AlsoReaches, n.Namespace)
+	}
+	for _, s := range m.Plan.Shadows {
+		fmt.Fprintf(w, "  shadowed %s: %s overridden by %s\n", s.Target, s.SourceName, s.WonBy)
 	}
 	for _, p := range m.Projection.Problems {
-		fmt.Fprintf(w, "  skipped %s (%s)\n", p.Component, p.Detail)
+		if p.Kind == project.ProblemUnsupported {
+			fmt.Fprintf(w, "  skipped  %s on %s (%s)\n", p.Component, p.Agent, p.Detail)
+		}
 	}
-	for _, n := range m.Projection.Notices {
-		fmt.Fprintf(w, "  note: skills for %s also reach %v via %s\n", n.Selected, n.AlsoReaches, n.Namespace)
+}
+
+// renderIssues lists every blocking issue with its kind and reference, the
+// reasons a sync would not (or did not) apply.
+func renderIssues(w io.Writer, m runtime.Model) {
+	for _, b := range m.Blockers {
+		fmt.Fprintf(w, "  ! %-18s %s: %s\n", b.Kind, b.Ref, b.Detail)
 	}
 }

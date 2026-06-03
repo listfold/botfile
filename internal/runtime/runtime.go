@@ -71,6 +71,22 @@ const (
 	BlockerConflict
 )
 
+// String renders a BlockerKind as a stable, human-readable token.
+func (k BlockerKind) String() string {
+	switch k {
+	case BlockerScanProblem:
+		return "scan-problem"
+	case BlockerProjectionProblem:
+		return "projection-problem"
+	case BlockerPlanProblem:
+		return "plan-problem"
+	case BlockerConflict:
+		return "conflict"
+	default:
+		return "unknown-blocker"
+	}
+}
+
 // Blocker is a machine-detectable reason the reducer did not apply.
 //
 // The dividing line is whether the desired model is trustworthy enough to act

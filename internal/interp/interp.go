@@ -14,6 +14,8 @@ package interp
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"codeberg.org/botfile/botfile/internal/apply"
 	"codeberg.org/botfile/botfile/internal/config"
@@ -27,20 +29,72 @@ import (
 
 // Deps are the ports the interpreter performs effects through. FS handles the
 // world read and apply (symlink I/O); LoadConfig reads and validates the config;
-// ScanSource scans one source location into its components.
+// ScanSource scans one already-resolved absolute source path into its
+// components; Home is used to expand a leading ~ in a source location.
 type Deps struct {
 	FS         fsport.FS
 	LoadConfig func(path string) (core.Config, error)
-	ScanSource func(location string) source.Result
+	ScanSource func(absPath string) source.Result
+	Home       string
 }
 
-// OSDeps returns the production interpreter, backed by the real filesystem.
-func OSDeps() Deps {
+// OSDeps returns the production interpreter, backed by the real filesystem, with
+// home used for ~ expansion of source locations.
+func OSDeps(home string) Deps {
 	return Deps{
 		FS:         fsport.OS{},
 		LoadConfig: config.Load,
 		ScanSource: scanLocal,
+		Home:       home,
 	}
+}
+
+// resolveLocation turns a configured source location into an absolute local path
+// for scanning and as the planner root, or a typed problem when it cannot. A
+// remote (git URL) location is not yet supported and is reported, not fetched; a
+// leading ~ is expanded against Home; a relative path is made absolute, so a
+// config like location = "./team" syncs instead of producing relative
+// destinations the planner would reject as invalid-path.
+func (d Deps) resolveLocation(location string) (string, *source.Problem) {
+	if isRemote(location) {
+		return location, &source.Problem{
+			Kind: source.ProblemUnreadable, Path: location,
+			Detail: "remote (git URL) sources are not yet supported; clone it locally and point the source at the path",
+		}
+	}
+	path := location
+	switch {
+	case path == "~":
+		path = d.Home
+	case strings.HasPrefix(path, "~/"):
+		path = filepath.Join(d.Home, path[2:])
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return location, &source.Problem{
+			Kind: source.ProblemUnreadable, Path: location,
+			Detail: "cannot resolve source location: " + err.Error(),
+		}
+	}
+	return abs, nil
+}
+
+// isRemote reports whether a location is a remote URL rather than a local path:
+// a scheme like https:// or ssh://, or scp-like syntax (user@host:path).
+func isRemote(location string) bool {
+	if strings.Contains(location, "://") {
+		return true
+	}
+	if i := strings.Index(location, "@"); i > 0 {
+		rest := location[i+1:]
+		if strings.Contains(rest, ":") &&
+			!strings.HasPrefix(location, "/") &&
+			!strings.HasPrefix(location, ".") &&
+			!strings.HasPrefix(location, "~") {
+			return true
+		}
+	}
+	return false
 }
 
 // scanLocal scans a source at a local directory path. A missing or unreadable
@@ -78,12 +132,16 @@ func (d Deps) perform(cmd runtime.Cmd) runtime.Msg {
 		sources := make([]project.Source, 0, len(c.Sources))
 		var problems []source.Problem
 		for _, s := range c.Sources {
-			res := d.ScanSource(s.Location)
-			sources = append(sources, project.Source{
-				Name:    s.Name,
-				Root:    s.Location,
-				Plugins: res.Plugins,
-			})
+			root, prob := d.resolveLocation(s.Location)
+			if prob != nil {
+				problems = append(problems, *prob)
+				// Record the source with no plugins; an unresolved location
+				// contributes nothing and blocks via the scan problem.
+				sources = append(sources, project.Source{Name: s.Name, Root: root})
+				continue
+			}
+			res := d.ScanSource(root)
+			sources = append(sources, project.Source{Name: s.Name, Root: root, Plugins: res.Plugins})
 			problems = append(problems, res.Problems...)
 		}
 		return runtime.SourcesScanned{Sources: sources, Problems: problems}
