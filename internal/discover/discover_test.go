@@ -7,6 +7,54 @@ import (
 	"codeberg.org/botfile/botfile/internal/fsport"
 )
 
+func TestFindFixedFileConsidersOnlyTheSingleton(t *testing.T) {
+	t.Parallel()
+	// A fixed-file namespace (a singleton like ~/.codex/AGENTS.md) must consider
+	// only that one entry, never the rest of its directory, which holds unrelated
+	// user files botfile must not report as adoptable (manifesto 33).
+	fsys := fsport.NewMem()
+	dir := "/home/u/.codex"
+	if err := fsys.MkdirAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	fsys.AddFile(dir + "/AGENTS.md") // the agent-authored singleton: adoptable
+	fsys.AddFile(dir + "/notes.md")  // an unrelated user file: must be ignored
+	fsys.AddFile(dir + "/config.toml")
+
+	got, err := Find(fsys, []Namespace{
+		{Agents: []core.AgentID{core.AgentCodexCLI}, Kind: core.KindInstruction, Dir: dir, File: "AGENTS.md"},
+	})
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != dir+"/AGENTS.md" || got[0].Ref() != "instruction/AGENTS" {
+		t.Fatalf("found = %+v, want only instruction/AGENTS at the singleton path", got)
+	}
+}
+
+func TestFindFixedFileSkipsForeignOrMissing(t *testing.T) {
+	t.Parallel()
+	// A managed (symlink) singleton is not adoptable; a missing one yields nothing.
+	fsys := fsport.NewMem()
+	dir := "/home/u/.codex"
+	if err := fsys.MkdirAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsys.Symlink("/src/team/p/instructions/global", dir+"/AGENTS.md"); err != nil {
+		t.Fatal(err)
+	}
+	ns := []Namespace{{Agents: []core.AgentID{core.AgentCodexCLI}, Kind: core.KindInstruction, Dir: dir, File: "AGENTS.md"}}
+	got, err := Find(fsys, ns)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("a symlinked singleton must not be adoptable: got %+v, err %v", got, err)
+	}
+	// And a missing one (no AGENTS.md) is simply skipped.
+	got, err = Find(fsport.NewMem(), ns)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("a missing singleton must yield nothing: got %+v, err %v", got, err)
+	}
+}
+
 func TestFindUnmanagedSkillsAndInstructions(t *testing.T) {
 	t.Parallel()
 	fsys := fsport.NewMem()

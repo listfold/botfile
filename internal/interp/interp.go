@@ -158,7 +158,7 @@ func (d Deps) perform(cmd runtime.Cmd) runtime.Msg {
 		return runtime.SourcesScanned{Sources: sources, Problems: problems}
 
 	case runtime.CmdReadWorld:
-		w, err := world.Read(d.FS, c.Targets, c.ManagedDirs)
+		w, err := world.Read(d.FS, c.Targets, c.ManagedDirs, c.ManagedFiles)
 		if err != nil {
 			return runtime.Failed{Stage: "read-world", Err: err}
 		}

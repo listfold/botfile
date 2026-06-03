@@ -12,6 +12,11 @@
 //     symlink botfile created but no longer desires is seen and removed as an
 //     orphan (manifesto 33). Non-symlink entries in those directories are
 //     user-owned and deliberately not recorded; the planner leaves them alone.
+//   - Each managed fixed file (a singleton target like ~/.codex/AGENTS.md), one
+//     exact path at a time. A singleton lives in a directory full of unrelated
+//     user files, so botfile observes only that file, never scanning its parent
+//     (manifesto 33). Recording it lets an orphaned, no-longer-desired singleton
+//     symlink be removed without touching its siblings.
 //
 // The world reader records raw entries only; deciding which symlinks are
 // botfile-managed (destination under a source root) is the planner's job, so the
@@ -30,8 +35,10 @@ import (
 // Read observes the filesystem through fsys into a reconcile.World.
 // desiredTargets are the absolute target paths the projection produced;
 // managedDirs are the absolute namespace directories to scan for existing
-// symlinks (orphan candidates). A managedDir that does not exist yet is skipped.
-func Read(fsys fsport.FS, desiredTargets, managedDirs []string) (reconcile.World, error) {
+// symlinks (orphan candidates); managedFiles are exact singleton paths to observe
+// one at a time, never scanning their parent. A managedDir or managedFile that
+// does not exist yet is skipped.
+func Read(fsys fsport.FS, desiredTargets, managedDirs, managedFiles []string) (reconcile.World, error) {
 	entries := make(map[string]reconcile.Entry)
 
 	// Observe each desired target. A foreign file at a desired target must be
@@ -47,6 +54,23 @@ func Read(fsys fsport.FS, desiredTargets, managedDirs []string) (reconcile.World
 			return reconcile.World{}, err
 		}
 		entries[clean] = toEntry(e)
+	}
+
+	// Observe each managed fixed file directly. Only a symlink is an orphan
+	// candidate; a user-owned file at the path is left for the planner to ignore
+	// (or to report as a conflict when it is also a desired target).
+	for _, f := range managedFiles {
+		clean := filepath.Clean(f)
+		if _, ok := entries[clean]; ok {
+			continue
+		}
+		e, err := fsys.Lstat(clean)
+		if err != nil {
+			return reconcile.World{}, err
+		}
+		if e.IsSymlink {
+			entries[clean] = reconcile.Entry{Kind: reconcile.Symlink, Dest: e.Dest}
+		}
 	}
 
 	// Scan the managed namespace directories for existing symlinks not already

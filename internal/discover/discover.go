@@ -21,14 +21,21 @@ import (
 	"codeberg.org/botfile/botfile/internal/source"
 )
 
-// Namespace is one kind directory to scan for unmanaged components, with every
-// agent that reads it. A directory shared by several agents (for example
+// Namespace is one surface to scan for unmanaged components, with every agent
+// that reads it. A directory shared by several agents (for example
 // ~/.agents/skills) is one Namespace with several Agents, so it is scanned once
 // but its components are attributed to all of them.
+//
+// When File is empty the Dir is scanned, every entry a candidate. When File is
+// set the surface is a single fixed file at Dir/File (a singleton like
+// ~/.codex/AGENTS.md): only that one entry is considered, never the rest of Dir,
+// which holds unrelated user files botfile must not read as adoptable (manifesto
+// 33).
 type Namespace struct {
 	Agents []core.AgentID
 	Kind   core.Kind
-	Dir    string // absolute path, for example ~/.claude/skills
+	Dir    string // absolute path, for example ~/.claude/skills or ~/.codex
+	File   string // when set, the only entry to consider under Dir (for example AGENTS.md)
 }
 
 // Unmanaged is an adoptable component found in an agent namespace, attributed to
@@ -44,16 +51,22 @@ type Unmanaged struct {
 func (u Unmanaged) Ref() string { return string(u.Kind) + "/" + u.Name }
 
 // Find scans each namespace and returns the unmanaged components, sorted by
-// path. A namespace directory that does not exist is skipped.
+// path. A namespace whose directory or fixed file does not exist is skipped.
 func Find(fsys fsport.FS, namespaces []Namespace) ([]Unmanaged, error) {
 	var found []Unmanaged
 	for _, ns := range namespaces {
-		names, err := fsys.ReadDir(ns.Dir)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
+		// A fixed-file surface considers exactly one entry, never the rest of its
+		// directory (manifesto 33).
+		names := []string{ns.File}
+		if ns.File == "" {
+			entries, err := fsys.ReadDir(ns.Dir)
+			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return nil, err
 			}
-			return nil, err
+			names = entries
 		}
 		for _, name := range names {
 			path := filepath.Join(ns.Dir, name)

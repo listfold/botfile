@@ -208,6 +208,20 @@ func (a Agent) Target(root string, kind core.Kind, name string) (string, bool) {
 	return filepath.Join(parts...), true
 }
 
+// FixedFile reports whether the agent installs a kind as one fixed file (a
+// LeafFixed singleton like AGENTS.md) rather than as entries in a scanned
+// directory, and the fixed filename if so. Callers use it to observe and discover
+// only that one file, never the parent directory it sits in (manifesto 33): a
+// singleton's namespace directory holds unrelated user files botfile must not
+// touch.
+func (a Agent) FixedFile(kind core.Kind) (string, bool) {
+	rule, ok := a.rules[kind]
+	if !ok || rule.Shape != LeafFixed {
+		return "", false
+	}
+	return rule.Filename, true
+}
+
 // Set is a collection of agents keyed by ID: the matrix the projection consumes.
 type Set struct {
 	agents map[core.AgentID]Agent

@@ -93,6 +93,50 @@ func TestProjectUnsupportedAgentIsProblem(t *testing.T) {
 	}
 }
 
+func TestProjectTwoInstructionsToOneSingletonAreAmbiguous(t *testing.T) {
+	t.Parallel()
+	// A source with two instructions, wildcard-selected to a singleton agent,
+	// projects two links at the one fixed target. That is the same-source
+	// many-to-one that reconcile reports as an ambiguous target (manifesto 35):
+	// precedence chooses between sources, not within one, so botfile does not pick.
+	src := Source{
+		Name: "team", Root: "/src/team",
+		Plugins: []core.Plugin{{
+			Name: "coding",
+			Components: []core.Component{
+				{Kind: core.KindInstruction, Name: "go-style"},
+				{Kind: core.KindInstruction, Name: "review"},
+			},
+		}},
+	}
+	cfg := cfgWith(core.Selection{
+		SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
+		Agents: []core.AgentID{core.AgentCodexCLI},
+	})
+	res := Project(cfg, []Source{src}, agent.Default(), roots())
+	n := 0
+	for _, l := range res.Links {
+		if l.Target == "/home/u/.codex/AGENTS.md" {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("want two links contending for ~/.codex/AGENTS.md, got %d: %+v", n, res.Links)
+	}
+	plan := reconcile.Reconcile(res.Links, reconcile.World{}, reconcile.Options{
+		Roots: []reconcile.Root{{Name: "team", Path: "/src/team"}},
+	})
+	found := false
+	for _, p := range plan.Problems {
+		if p.Kind == reconcile.ProblemAmbiguousTarget && p.Target == "/home/u/.codex/AGENTS.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want an ambiguous-target problem for the singleton, got %+v", plan.Problems)
+	}
+}
+
 func TestProjectCodexSkillAndSingletonInstruction(t *testing.T) {
 	t.Parallel()
 	// codex-cli installs skills under the shared ~/.agents/skills and its single

@@ -22,7 +22,7 @@ func TestReadClassifiesTargetsAndFindsOrphans(t *testing.T) {
 	fsys.AddFile(dir + "/userskill")
 
 	desired := []string{dir + "/want", dir + "/userskill"} // want absent; userskill foreign
-	w, err := Read(fsys, desired, []string{dir})
+	w, err := Read(fsys, desired, []string{dir}, nil)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -44,10 +44,63 @@ func TestReadClassifiesTargetsAndFindsOrphans(t *testing.T) {
 	}
 }
 
+func TestReadManagedFileObservesOnlyTheSingleton(t *testing.T) {
+	t.Parallel()
+	// A singleton lives in a directory full of unrelated user files and symlinks.
+	// The world reader observes only the exact managed file, never scanning the
+	// parent, so a sibling symlink is not picked up as an orphan candidate.
+	fsys := fsport.NewMem()
+	dir := "/home/u/.codex"
+	if err := fsys.MkdirAll(dir); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// The managed singleton: a botfile symlink no longer desired (an orphan).
+	if err := fsys.Symlink("/src/team/coding/instructions/global", dir+"/AGENTS.md"); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	// An unrelated symlink sitting in the same directory: must NOT be observed.
+	if err := fsys.Symlink("/src/team/whatever", dir+"/sibling-link"); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	fsys.AddFile(dir + "/history.md") // an unrelated user file
+
+	w, err := Read(fsys, nil, nil, []string{dir + "/AGENTS.md"})
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if got := w.Entries[dir+"/AGENTS.md"]; got.Kind != reconcile.Symlink {
+		t.Errorf("AGENTS.md = %+v, want managed Symlink", got)
+	}
+	if len(w.Entries) != 1 {
+		t.Fatalf("entries = %v, want only AGENTS.md (the sibling link must be untouched)", w.Entries)
+	}
+}
+
+func TestReadManagedFileIgnoresForeignSingleton(t *testing.T) {
+	t.Parallel()
+	// A user-authored file at the singleton path is not a botfile symlink, so it is
+	// not recorded as an orphan candidate (the planner reports a conflict only if it
+	// is also a desired target).
+	fsys := fsport.NewMem()
+	dir := "/home/u/.codex"
+	if err := fsys.MkdirAll(dir); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	fsys.AddFile(dir + "/AGENTS.md")
+
+	w, err := Read(fsys, nil, nil, []string{dir + "/AGENTS.md"})
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(w.Entries) != 0 {
+		t.Fatalf("entries = %v, want empty (a foreign singleton is not an orphan)", w.Entries)
+	}
+}
+
 func TestReadSkipsMissingManagedDir(t *testing.T) {
 	t.Parallel()
 	fsys := fsport.NewMem()
-	w, err := Read(fsys, nil, []string{"/no/such/dir"})
+	w, err := Read(fsys, nil, []string{"/no/such/dir"}, []string{"/no/such/file.md"})
 	if err != nil {
 		t.Fatalf("Read must skip a missing managed dir, got %v", err)
 	}
@@ -69,7 +122,7 @@ func TestReadFeedsReconcileOrphanRemoval(t *testing.T) {
 		t.Fatalf("Symlink: %v", err)
 	}
 
-	w, err := Read(fsys, nil, []string{dir})
+	w, err := Read(fsys, nil, []string{dir}, nil)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}

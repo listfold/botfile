@@ -422,6 +422,43 @@ func TestAdoptIgnoresUnrelatedSourceScanProblem(t *testing.T) {
 	}
 }
 
+func TestManagedSurfacesTreatsSingletonAsFile(t *testing.T) {
+	t.Parallel()
+	// Selecting codex (whose instruction is a singleton) must put ~/.codex/AGENTS.md
+	// in managed FILES, never ~/.codex in managed DIRS: botfile owns only that one
+	// file, not the directory of unrelated codex state (manifesto 33).
+	cfg := core.Config{
+		Sources: []core.Source{{Name: "team", Location: "/src/team"}},
+		Selections: []core.Selection{{
+			SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
+			Agents: []core.AgentID{core.AgentCodexCLI},
+		}},
+	}
+	roots := agent.Default().ResolveRoots("/home/u", noEnv)
+	dirs, files := managedSurfaces(cfg, agent.Default(), roots)
+	if !contains(files, "/home/u/.codex/AGENTS.md") {
+		t.Errorf("managed files = %v, want ~/.codex/AGENTS.md", files)
+	}
+	if contains(dirs, "/home/u/.codex") {
+		t.Errorf("managed dirs = %v, must NOT include the singleton's parent ~/.codex", dirs)
+	}
+	if !contains(dirs, "/home/u/.agents/skills") {
+		t.Errorf("managed dirs = %v, want the skills dir ~/.agents/skills", dirs)
+	}
+
+	// Discovery sees the singleton as a fixed-file namespace, scanning only AGENTS.md.
+	ns := allNamespaces(agent.Default(), roots)
+	var codexInstr *discover.Namespace
+	for i := range ns {
+		if ns[i].Dir == "/home/u/.codex" && ns[i].Kind == core.KindInstruction {
+			codexInstr = &ns[i]
+		}
+	}
+	if codexInstr == nil || codexInstr.File != "AGENTS.md" {
+		t.Fatalf("codex instruction namespace = %+v, want File AGENTS.md under ~/.codex", codexInstr)
+	}
+}
+
 func TestManagedNamespacesKeysByKindNotJustDir(t *testing.T) {
 	t.Parallel()
 	// A custom matrix that maps both skill and instruction to the same directory

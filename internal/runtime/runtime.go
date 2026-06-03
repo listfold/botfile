@@ -201,10 +201,13 @@ type CmdScanSources struct {
 	BaseDir string
 }
 
-// CmdReadWorld asks the interpreter to observe Targets and scan ManagedDirs.
+// CmdReadWorld asks the interpreter to observe Targets, scan ManagedDirs, and
+// observe each ManagedFile (singleton targets observed one path at a time, never
+// by scanning their parent directory).
 type CmdReadWorld struct {
-	Targets     []string
-	ManagedDirs []string
+	Targets      []string
+	ManagedDirs  []string
+	ManagedFiles []string
 }
 
 // CmdApply asks the interpreter to apply Ops through the filesystem port.
@@ -298,9 +301,11 @@ func Update(m Model, msg Msg) (Model, Cmd) {
 			// Pure: expand selections over the scanned sources and the matrix.
 			m.Projection = project.Project(m.Config, m.Sources, m.Agents, m.Roots)
 			m.Phase = PhaseReadingWorld
+			dirs, files := managedSurfaces(m.Config, m.Agents, m.Roots)
 			return m, CmdReadWorld{
-				Targets:     targetsOf(m.Projection.Links),
-				ManagedDirs: managedDirs(m.Config, m.Agents, m.Roots),
+				Targets:      targetsOf(m.Projection.Links),
+				ManagedDirs:  dirs,
+				ManagedFiles: files,
 			}
 		}
 
@@ -418,19 +423,21 @@ func targetsOf(links []reconcile.LinkSpec) []string {
 	return out
 }
 
-// managedDirs returns the namespace directories botfile may have installed into
-// for the agents this config targets, so the world reader can find orphans
-// (manifesto 33). It is every supported (agent, kind) namespace for each agent
-// referenced by a selection.
-func managedDirs(cfg core.Config, agents agent.Set, roots agent.Roots) []string {
+// managedSurfaces returns the surfaces botfile may have installed into for the
+// agents this config targets, so the world reader can find orphans (manifesto
+// 33), split by shape: dirs are namespace directories to scan, files are exact
+// singleton targets to observe one at a time (never scanning their parent, which
+// holds unrelated user files). It covers every supported (agent, kind) for each
+// agent referenced by a selection.
+func managedSurfaces(cfg core.Config, agents agent.Set, roots agent.Roots) (dirs, files []string) {
 	used := make(map[core.AgentID]bool)
 	for _, sel := range cfg.Selections {
 		for _, a := range sel.Agents {
 			used[a] = true
 		}
 	}
-	seen := make(map[string]bool)
-	var dirs []string
+	seenDir := make(map[string]bool)
+	seenFile := make(map[string]bool)
 	for id := range used {
 		ag, ok := agents.Lookup(id)
 		if !ok {
@@ -441,14 +448,22 @@ func managedDirs(cfg core.Config, agents agent.Set, roots agent.Roots) []string 
 			if !ok {
 				continue
 			}
-			if dir, ok := ag.Namespace(root, kind); ok && !seen[dir] {
-				seen[dir] = true
+			if _, fixed := ag.FixedFile(kind); fixed {
+				if f, ok := ag.Target(root, kind, ""); ok && !seenFile[f] {
+					seenFile[f] = true
+					files = append(files, f)
+				}
+				continue
+			}
+			if dir, ok := ag.Namespace(root, kind); ok && !seenDir[dir] {
+				seenDir[dir] = true
 				dirs = append(dirs, dir)
 			}
 		}
 	}
 	sort.Strings(dirs)
-	return dirs
+	sort.Strings(files)
+	return dirs, files
 }
 
 // scanProblemForSource returns the first scan problem attributed to the named
@@ -497,14 +512,18 @@ func namespacesFor(ids []core.AgentID, agents agent.Set, roots agent.Roots) []di
 	used := append([]core.AgentID(nil), ids...) // copy: do not reorder the caller's slice
 	sort.Slice(used, func(i, j int) bool { return used[i] < used[j] })
 
-	// Key by (kind, directory), not directory alone: a custom matrix could map
-	// two kinds to the same directory, and those are distinct namespaces. Agents
-	// that share a (kind, directory) are still accumulated onto one namespace.
+	// Key by (kind, directory, file): a custom matrix could map two kinds to the
+	// same directory, and a fixed-file surface is distinct from a directory scan at
+	// the same dir. Agents that share a key are accumulated onto one namespace. A
+	// fixed-file kind (a singleton like AGENTS.md) carries its filename so
+	// discovery reads only that one entry, never the rest of its directory
+	// (manifesto 33).
 	type key struct {
 		kind core.Kind
 		dir  string
+		file string
 	}
-	byKey := make(map[key]int) // (kind, dir) -> index into ns
+	byKey := make(map[key]int) // (kind, dir, file) -> index into ns
 	var ns []discover.Namespace
 	for _, id := range used {
 		ag, ok := agents.Lookup(id)
@@ -520,13 +539,14 @@ func namespacesFor(ids []core.AgentID, agents agent.Set, roots agent.Roots) []di
 			if !ok {
 				continue
 			}
-			k := key{kind, dir}
+			file, _ := ag.FixedFile(kind) // "" for a directory surface
+			k := key{kind, dir, file}
 			if i, exists := byKey[k]; exists {
 				ns[i].Agents = append(ns[i].Agents, id)
 				continue
 			}
 			byKey[k] = len(ns)
-			ns = append(ns, discover.Namespace{Agents: []core.AgentID{id}, Kind: kind, Dir: dir})
+			ns = append(ns, discover.Namespace{Agents: []core.AgentID{id}, Kind: kind, Dir: dir, File: file})
 		}
 	}
 	sort.Slice(ns, func(i, j int) bool {
