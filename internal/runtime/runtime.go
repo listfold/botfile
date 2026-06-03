@@ -553,7 +553,12 @@ func namespacesFor(ids []core.AgentID, agents agent.Set, roots agent.Roots) []di
 		if ns[i].Dir != ns[j].Dir {
 			return ns[i].Dir < ns[j].Dir
 		}
-		return ns[i].Kind < ns[j].Kind
+		if ns[i].Kind != ns[j].Kind {
+			return ns[i].Kind < ns[j].Kind
+		}
+		// File is part of the dedupe key, so it must also order: two fixed-file
+		// surfaces of the same kind in one dir (a custom matrix) stay deterministic.
+		return ns[i].File < ns[j].File
 	})
 	return ns
 }
