@@ -88,7 +88,9 @@ func (OS) Symlink(dest, link string) error {
 	if !filepath.IsAbs(dest) {
 		return notAbs(dest)
 	}
-	return os.Symlink(dest, link)
+	// symlinkResult annotates the Windows "Developer Mode off" failure with
+	// guidance (manifesto 41) and is a no-op elsewhere.
+	return symlinkResult(os.Symlink(dest, link))
 }
 
 // Remove implements FS over os.Remove.
