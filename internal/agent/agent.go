@@ -266,12 +266,21 @@ func NewSet(specs ...Spec) (Set, error) {
 //
 // Skills (tier 1 auto-discovery: one directory per skill, each with a SKILL.md,
 // found by presence, manifesto 17, 22, 48) are specified for claude-code,
-// codex-cli, and copilot-cli. Memory is specified only for claude-code (tier 1).
-// codex-cli memory is unsupported (a single merged AGENTS.md, no per-file
-// surface; manifesto 18). copilot-cli memory is tier-2-supportable via
-// COPILOT_CUSTOM_INSTRUCTIONS_DIRS (manifesto 18, 23) but is not yet in the
-// matrix, pending a tier-2 registration mechanism. opencode, copilot-vscode, and
-// pi.dev are pending vendor confirmation.
+// codex-cli, copilot-cli, opencode, and pi.dev. Four of those (codex-cli,
+// copilot-cli, opencode, pi.dev) read the cross-agent ~/.agents/skills drop-in,
+// so botfile targets that shared directory for all of them: one symlink serves
+// every reader, at the cost of coarse selection across the pool (manifesto 49;
+// callouts/per-agent-skill-selection-needs-isolated-namespaces.md). claude-code does not read the
+// shared dir (only ~/.claude/skills), so it stays isolated and keeps per-agent
+// selection. opencode also reads ~/.config/opencode/skills and ~/.claude/skills,
+// and pi.dev also reads ~/.pi/agent/skills; we install to the shared dir on
+// purpose, to stay on the cross-agent convention.
+//
+// Memory is specified only for claude-code (tier 1). codex-cli memory is
+// unsupported (a single merged AGENTS.md, no per-file surface; manifesto 18).
+// copilot-cli memory is tier-2-supportable via COPILOT_CUSTOM_INSTRUCTIONS_DIRS
+// (manifesto 18, 23) but is not yet in the matrix, pending a tier-2 registration
+// mechanism. copilot-vscode is pending vendor confirmation.
 func Default() Set {
 	set, err := NewSet(
 		Spec{
@@ -306,9 +315,35 @@ func Default() Set {
 			// shared ~/.agents/skills (the same root codex uses), so one symlink
 			// serves every agent that reads it. Consequence: a skill here reaches the
 			// whole shared pool, so skill selection is coarse across it (see
-			// callouts/shared-skills-dir-and-selection.md). Tier 1. No documented
+			// callouts/per-agent-skill-selection-needs-isolated-namespaces.md). Tier 1. No documented
 			// home-override variable.
 			ID:   core.AgentCopilotCLI,
+			Base: Base{HomeRelative: []string{".agents"}},
+			Rules: map[core.Kind]InstallRule{
+				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
+			},
+		},
+		Spec{
+			// opencode scans several skill dirs, including the cross-agent
+			// ~/.agents/skills/<skill>/SKILL.md drop-in (alongside
+			// ~/.config/opencode/skills and ~/.claude/skills). botfile installs to
+			// the shared ~/.agents/skills so one symlink serves opencode and every
+			// other agent that reads it; tier 1, found by presence. No documented
+			// home-override variable for skill discovery.
+			// Source: opencode.ai/docs/skills.
+			ID:   core.AgentOpenCode,
+			Base: Base{HomeRelative: []string{".agents"}},
+			Rules: map[core.Kind]InstallRule{
+				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
+			},
+		},
+		Spec{
+			// pi.dev scans both its own ~/.pi/agent/skills and the cross-agent
+			// ~/.agents/skills (in the shared dir only directories with a SKILL.md
+			// are skills; root .md files are ignored). botfile targets the shared
+			// dir to stay on the cross-agent convention; tier 1, found by presence.
+			// Source: pi.dev/docs/latest/skills.
+			ID:   core.AgentPiDev,
 			Base: Base{HomeRelative: []string{".agents"}},
 			Rules: map[core.Kind]InstallRule{
 				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},

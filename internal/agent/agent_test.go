@@ -118,10 +118,33 @@ func TestStillAbsentAgents(t *testing.T) {
 	t.Parallel()
 	// Agents without a confirmed vendor spec must stay out of the matrix, so a
 	// selection targeting them is reported unsupported rather than guessed.
-	for _, id := range []core.AgentID{core.AgentOpenCode, core.AgentCopilotVSCode, core.AgentPiDev} {
+	for _, id := range []core.AgentID{core.AgentCopilotVSCode} {
 		if _, ok := Default().Lookup(id); ok {
 			t.Errorf("%s has no confirmed vendor spec and must not be in the default matrix", id)
 		}
+	}
+}
+
+func TestSharedSkillsPool(t *testing.T) {
+	t.Parallel()
+	// The four agents that read the cross-agent ~/.agents/skills drop-in must all
+	// resolve skills to the same directory, so the projection sees one shared pool
+	// (one symlink reaches every reader). claude-code stays isolated.
+	roots := Default().ResolveRoots("/home/u", noEnv)
+	for _, id := range []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI, core.AgentOpenCode, core.AgentPiDev} {
+		ag, ok := Default().Lookup(id)
+		if !ok {
+			t.Fatalf("%s missing from the default matrix", id)
+		}
+		dir, ok := ag.Namespace(roots[id], core.KindSkill)
+		if !ok || dir != "/home/u/.agents/skills" {
+			t.Errorf("%s skill namespace = %q (ok %v), want /home/u/.agents/skills", id, dir, ok)
+		}
+	}
+	// claude-code reads only its own dir, so it is not in the shared pool.
+	cc, _ := Default().Lookup(core.AgentClaudeCode)
+	if dir, _ := cc.Namespace(roots[core.AgentClaudeCode], core.KindSkill); dir != "/home/u/.claude/skills" {
+		t.Errorf("claude-code skill namespace = %q, want /home/u/.claude/skills (isolated)", dir)
 	}
 }
 
