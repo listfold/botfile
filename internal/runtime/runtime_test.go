@@ -102,6 +102,72 @@ func TestSyncRunAppliesThenDone(t *testing.T) {
 	}
 }
 
+func TestSyncBlocksOnConflict(t *testing.T) {
+	t.Parallel()
+	m, _ := newModel(t, ModeSync)
+	m, _ = Update(m, ConfigLoaded{Config: testConfig()})
+	m, _ = Update(m, SourcesScanned{Sources: []project.Source{scannedTeam()}})
+	// A foreign file sits where the skill would install: a conflict.
+	world := reconcile.World{Entries: map[string]reconcile.Entry{
+		"/home/u/.claude/skills/go-style": {Kind: reconcile.Foreign},
+	}}
+	m, cmd := Update(m, WorldRead{World: world})
+	if _, ok := cmd.(CmdNone); !ok || m.Phase != PhaseBlocked {
+		t.Fatalf("conflicting sync = phase %v cmd %T, want Blocked + CmdNone (no apply)", m.Phase, cmd)
+	}
+	if len(m.Blockers) != 1 || m.Blockers[0].Kind != BlockerConflict || m.Blockers[0].Target != "/home/u/.claude/skills/go-style" {
+		t.Fatalf("blockers = %+v, want one conflict at the skill target", m.Blockers)
+	}
+	if !m.Done() {
+		t.Fatal("a blocked model is terminal")
+	}
+}
+
+func TestBlockersClassifyProblemsAndConflicts(t *testing.T) {
+	t.Parallel()
+	plan := reconcile.Plan{
+		Problems:  []reconcile.Problem{{Kind: reconcile.ProblemAmbiguousTarget, Target: "/t/x", Detail: "ambiguous"}},
+		Conflicts: []reconcile.Conflict{{Target: "/t/y", Reason: "foreign file"}},
+	}
+	bs := blockers(plan)
+	if len(bs) != 2 {
+		t.Fatalf("blockers = %+v, want one per problem and conflict", bs)
+	}
+	if bs[0].Kind != BlockerPlanProblem || bs[1].Kind != BlockerConflict {
+		t.Fatalf("blocker kinds = %v, %v; want plan-problem then conflict", bs[0].Kind, bs[1].Kind)
+	}
+}
+
+func TestTerminalPhasesAreTerminal(t *testing.T) {
+	t.Parallel()
+	// A Done model ignores further messages.
+	done := Model{Phase: PhaseDone}
+	if m, cmd := Update(done, ConfigLoaded{Config: testConfig()}); m.Phase != PhaseDone {
+		t.Errorf("Done + ConfigLoaded advanced to %v (cmd %T); must stay Done", m.Phase, cmd)
+	}
+	// A Failed model ignores further messages.
+	failed := Model{Phase: PhaseFailed}
+	if m, _ := Update(failed, WorldRead{}); m.Phase != PhaseFailed {
+		t.Errorf("Failed + WorldRead advanced to %v; must stay Failed", m.Phase)
+	}
+	// A Blocked model ignores further messages.
+	blocked := Model{Phase: PhaseBlocked}
+	if m, _ := Update(blocked, Applied{}); m.Phase != PhaseBlocked {
+		t.Errorf("Blocked + Applied advanced to %v; must stay Blocked", m.Phase)
+	}
+}
+
+func TestOutOfOrderMessageIsIgnored(t *testing.T) {
+	t.Parallel()
+	// An Applied message during Scanning is stale and must not complete the run.
+	m, _ := newModel(t, ModeSync)
+	m, _ = Update(m, ConfigLoaded{Config: testConfig()}) // now PhaseScanning
+	got, cmd := Update(m, Applied{})
+	if got.Phase != PhaseScanning {
+		t.Fatalf("stale Applied advanced Scanning to %v (cmd %T)", got.Phase, cmd)
+	}
+}
+
 func TestFailedStops(t *testing.T) {
 	t.Parallel()
 	m, _ := newModel(t, ModeSync)

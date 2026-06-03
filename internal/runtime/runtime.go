@@ -44,8 +44,35 @@ const (
 	PhaseReadingWorld
 	PhaseApplying
 	PhaseDone
+	// PhaseBlocked is terminal: the reducer refused to apply because the plan was
+	// built from a broken desired model or the observed world blocks it. It is
+	// distinct from PhaseFailed, which is an effect failure, not a model/world
+	// outcome.
+	PhaseBlocked
 	PhaseFailed
 )
+
+// BlockerKind classifies why a sync was refused before any effect ran.
+type BlockerKind int
+
+const (
+	// BlockerPlanProblem: the desired model is malformed (a reconcile Problem),
+	// so the plan must not be applied (reviews/patterns.md).
+	BlockerPlanProblem BlockerKind = iota
+	// BlockerConflict: an entry botfile does not own occupies a target path, so
+	// the desired state cannot be realized there (manifesto 35).
+	BlockerConflict
+)
+
+// Blocker is a machine-detectable reason the reducer did not apply. Scan and
+// projection problems are deliberately not blockers: an unsupported (agent,
+// kind) or a stray source file is expected partial coverage, reported on the
+// Model but not a reason to halt every clean install.
+type Blocker struct {
+	Kind   BlockerKind
+	Target string
+	Detail string
+}
 
 // Model is the immutable state of a run. The inputs block is seeded by the
 // interpreter at Init; the rest accumulates as Msgs arrive. Update returns a new
@@ -66,6 +93,7 @@ type Model struct {
 	ScanProblems []source.Problem
 	Projection   project.Result
 	Plan         reconcile.Plan
+	Blockers     []Blocker
 	Err          error
 	FailedStage  string
 }
@@ -143,52 +171,90 @@ func Init(mode Mode, configPath, home string, agents agent.Set, roots map[core.A
 }
 
 // Update is the pure reducer: it advances the Model by one Msg and returns the
-// next Cmd. The pure transforms (project, reconcile) happen here, inline,
+// next Cmd. It enforces the phase model: terminal phases ignore further
+// messages, a Failed message ends any non-terminal phase, and otherwise only the
+// message a phase expects advances it (a stale or out-of-order message is
+// ignored). The pure transforms (project, reconcile) happen here, inline,
 // because they need no I/O; only the steps that touch the world become Cmds.
 func Update(m Model, msg Msg) (Model, Cmd) {
-	switch msg := msg.(type) {
-	case ConfigLoaded:
-		m.Config = msg.Config
-		m.Phase = PhaseScanning
-		return m, CmdScanSources{Sources: m.Config.Sources}
-
-	case SourcesScanned:
-		m.Sources = msg.Sources
-		m.ScanProblems = msg.Problems
-		// Pure: expand selections over the scanned sources and the matrix.
-		m.Projection = project.Project(m.Config, m.Sources, m.Agents, m.Roots)
-		m.Phase = PhaseReadingWorld
-		return m, CmdReadWorld{
-			Targets:     targetsOf(m.Projection.Links),
-			ManagedDirs: managedDirs(m.Config, m.Agents, m.Roots),
-		}
-
-	case WorldRead:
-		// Pure: compute the plan from desired links and observed state.
-		m.Plan = reconcile.Reconcile(m.Projection.Links, msg.World, reconcileOpts(m.Sources))
-		if m.Mode == ModePlan {
-			m.Phase = PhaseDone
-			return m, CmdNone{}
-		}
-		m.Phase = PhaseApplying
-		return m, CmdApply{Ops: m.Plan.Ops}
-
-	case Applied:
-		m.Phase = PhaseDone
-		return m, CmdNone{}
-
-	case Failed:
+	if m.Done() {
+		return m, CmdNone{} // terminal phases are terminal
+	}
+	if f, ok := msg.(Failed); ok {
 		m.Phase = PhaseFailed
-		m.FailedStage = msg.Stage
-		m.Err = msg.Err
+		m.FailedStage = f.Stage
+		m.Err = f.Err
 		return m, CmdNone{}
 	}
 
+	switch m.Phase {
+	case PhaseLoadingConfig:
+		if cl, ok := msg.(ConfigLoaded); ok {
+			m.Config = cl.Config
+			m.Phase = PhaseScanning
+			return m, CmdScanSources{Sources: m.Config.Sources}
+		}
+
+	case PhaseScanning:
+		if ss, ok := msg.(SourcesScanned); ok {
+			m.Sources = ss.Sources
+			m.ScanProblems = ss.Problems
+			// Pure: expand selections over the scanned sources and the matrix.
+			m.Projection = project.Project(m.Config, m.Sources, m.Agents, m.Roots)
+			m.Phase = PhaseReadingWorld
+			return m, CmdReadWorld{
+				Targets:     targetsOf(m.Projection.Links),
+				ManagedDirs: managedDirs(m.Config, m.Agents, m.Roots),
+			}
+		}
+
+	case PhaseReadingWorld:
+		if wr, ok := msg.(WorldRead); ok {
+			// Pure: compute the plan, then the blockers that decide whether to apply.
+			m.Plan = reconcile.Reconcile(m.Projection.Links, wr.World, reconcileOpts(m.Sources))
+			m.Blockers = blockers(m.Plan)
+			if m.Mode == ModePlan {
+				m.Phase = PhaseDone // read-only: report the plan and its blockers
+				return m, CmdNone{}
+			}
+			if len(m.Blockers) > 0 {
+				m.Phase = PhaseBlocked // refuse to apply a broken or blocked plan
+				return m, CmdNone{}
+			}
+			m.Phase = PhaseApplying
+			return m, CmdApply{Ops: m.Plan.Ops}
+		}
+
+	case PhaseApplying:
+		if _, ok := msg.(Applied); ok {
+			m.Phase = PhaseDone
+			return m, CmdNone{}
+		}
+	}
+
+	// Stale or out-of-order (phase, message): ignore, leaving the Model unchanged.
 	return m, CmdNone{}
 }
 
 // Done reports whether the run reached a terminal phase.
-func (m Model) Done() bool { return m.Phase == PhaseDone || m.Phase == PhaseFailed }
+func (m Model) Done() bool {
+	return m.Phase == PhaseDone || m.Phase == PhaseBlocked || m.Phase == PhaseFailed
+}
+
+// blockers enumerates the machine-detectable reasons not to apply a plan: a
+// malformed desired model (reconcile Problems) and an unmanaged entry occupying
+// a managed path (Conflicts). They derive from already-sorted slices, so the
+// result is deterministic.
+func blockers(plan reconcile.Plan) []Blocker {
+	bs := make([]Blocker, 0, len(plan.Problems)+len(plan.Conflicts))
+	for _, p := range plan.Problems {
+		bs = append(bs, Blocker{Kind: BlockerPlanProblem, Target: p.Target, Detail: p.Detail})
+	}
+	for _, c := range plan.Conflicts {
+		bs = append(bs, Blocker{Kind: BlockerConflict, Target: c.Target, Detail: c.Reason})
+	}
+	return bs
+}
 
 // reconcileOpts builds the planner options from the scanned sources, preserving
 // their order so precedence is config declaration order, first declared wins
