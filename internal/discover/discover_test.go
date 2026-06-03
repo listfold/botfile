@@ -59,6 +59,33 @@ func TestFindUnmanagedSkillsAndMemories(t *testing.T) {
 	}
 }
 
+func TestFindRejectsNonRegularFiles(t *testing.T) {
+	t.Parallel()
+	fsys := fsport.NewMem()
+	skills := "/home/u/.claude/skills"
+	rules := "/home/u/.claude/rules"
+	mustMkdir(t, fsys, skills)
+	mustMkdir(t, fsys, rules)
+
+	// A skill directory whose SKILL.md is a special file (FIFO), not a regular
+	// file: not a valid component.
+	mustMkdir(t, fsys, skills+"/fifo-skill")
+	fsys.AddSpecial(skills + "/fifo-skill/SKILL.md")
+	// A memory namespace entry named like a memory but a special file.
+	fsys.AddSpecial(rules + "/special.md")
+
+	got, err := Find(fsys, []Namespace{
+		{Agent: core.AgentClaudeCode, Kind: core.KindSkill, Dir: skills},
+		{Agent: core.AgentClaudeCode, Kind: core.KindMemory, Dir: rules},
+	})
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("non-regular SKILL.md / .md must not be adoptable, got %+v", got)
+	}
+}
+
 func TestFindSkipsMissingNamespace(t *testing.T) {
 	t.Parallel()
 	fsys := fsport.NewMem()

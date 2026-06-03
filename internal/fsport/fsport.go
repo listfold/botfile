@@ -24,11 +24,14 @@ import (
 var ErrNotAbsolute = errors.New("path must be absolute")
 
 // Entry describes what exists at a path, observed without following symlinks
-// (an lstat). A missing path is Entry{Exists: false} with a nil error.
+// (an lstat). A missing path is Entry{Exists: false} with a nil error. IsDir and
+// IsRegular are mutually exclusive and only meaningful for a non-symlink that
+// Exists; a special file (FIFO, socket, device) has both false.
 type Entry struct {
 	Exists    bool
 	IsSymlink bool
-	IsDir     bool   // a directory (and not a symlink); meaningful when Exists
+	IsDir     bool   // a directory (and not a symlink)
+	IsRegular bool   // a regular file (and not a symlink, directory, or special file)
 	Dest      string // the symlink's destination when IsSymlink
 }
 
@@ -76,7 +79,7 @@ func (OS) Lstat(path string) (Entry, error) {
 		}
 		return Entry{Exists: true, IsSymlink: true, Dest: dest}, nil
 	}
-	return Entry{Exists: true, IsDir: fi.IsDir()}, nil
+	return Entry{Exists: true, IsDir: fi.IsDir(), IsRegular: fi.Mode().IsRegular()}, nil
 }
 
 // Symlink implements FS over os.Symlink. Both the link and its destination must

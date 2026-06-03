@@ -21,6 +21,7 @@ const (
 	memSymlink memKind = iota
 	memDir
 	memFile
+	memSpecial // a non-regular, non-dir, non-symlink entry (FIFO, socket, device)
 )
 
 type memNode struct {
@@ -33,10 +34,16 @@ func NewMem() *Mem {
 	return &Mem{nodes: make(map[string]memNode)}
 }
 
-// AddFile seeds an opaque non-symlink entry (a file botfile does not own), for
-// tests that exercise the "never clobber a non-symlink" guard.
+// AddFile seeds a regular non-symlink file (one botfile does not own), for tests
+// that exercise the "never clobber a non-symlink" guard.
 func (m *Mem) AddFile(path string) {
 	m.nodes[filepath.Clean(path)] = memNode{kind: memFile}
+}
+
+// AddSpecial seeds a non-regular special file (FIFO, socket, device), for tests
+// that exercise the "must be a regular file" rule.
+func (m *Mem) AddSpecial(path string) {
+	m.nodes[filepath.Clean(path)] = memNode{kind: memSpecial}
 }
 
 // Lstat implements FS.
@@ -51,7 +58,7 @@ func (m *Mem) Lstat(path string) (Entry, error) {
 	if n.kind == memSymlink {
 		return Entry{Exists: true, IsSymlink: true, Dest: n.dest}, nil
 	}
-	return Entry{Exists: true, IsDir: n.kind == memDir}, nil
+	return Entry{Exists: true, IsDir: n.kind == memDir, IsRegular: n.kind == memFile}, nil
 }
 
 // Symlink implements FS.

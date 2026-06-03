@@ -78,8 +78,8 @@ func classify(fsys fsport.FS, ns Namespace, name, path string, entry fsport.Entr
 			return Unmanaged{}, false // a skill is a directory (manifesto 48)
 		}
 		manifest, err := fsys.Lstat(filepath.Join(path, source.ManifestFile))
-		if err != nil || !manifest.Exists || manifest.IsDir || manifest.IsSymlink {
-			return Unmanaged{}, false // needs a real SKILL.md file
+		if err != nil || !manifest.IsRegular {
+			return Unmanaged{}, false // needs a regular SKILL.md file
 		}
 		if core.ValidateName("skill name", name) != nil {
 			return Unmanaged{}, false
@@ -87,8 +87,8 @@ func classify(fsys fsport.FS, ns Namespace, name, path string, entry fsport.Entr
 		return Unmanaged{Agent: ns.Agent, Kind: core.KindSkill, Name: name, Path: path}, true
 
 	case core.KindMemory:
-		if entry.IsDir {
-			return Unmanaged{}, false // a memory is a file (manifesto 48)
+		if !entry.IsRegular {
+			return Unmanaged{}, false // a memory is a regular file (manifesto 48)
 		}
 		mname, ok := source.MemoryName(name)
 		if !ok || core.ValidateName("memory name", mname) != nil {

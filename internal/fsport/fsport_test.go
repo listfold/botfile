@@ -49,8 +49,8 @@ func runConformance(t *testing.T, nb newBackend) {
 			t.Fatalf("MkdirAll: %v", err)
 		}
 		e, err := fsys.Lstat(dir)
-		if err != nil || !e.Exists || e.IsSymlink {
-			t.Fatalf("dir lstat = %+v, err %v; want existing non-symlink", e, err)
+		if err != nil || !e.Exists || e.IsSymlink || !e.IsDir || e.IsRegular {
+			t.Fatalf("dir lstat = %+v, err %v; want existing non-symlink directory", e, err)
 		}
 	})
 
@@ -65,7 +65,7 @@ func runConformance(t *testing.T, nb newBackend) {
 			t.Fatalf("Symlink: %v", err)
 		}
 		e, err := fsys.Lstat(link)
-		if err != nil || !e.IsSymlink || e.Dest != dest {
+		if err != nil || !e.IsSymlink || e.Dest != dest || e.IsDir || e.IsRegular {
 			t.Fatalf("symlink lstat = %+v, err %v; want symlink to %s", e, err, dest)
 		}
 	})
