@@ -18,6 +18,7 @@
 package runtime
 
 import (
+	"path/filepath"
 	"sort"
 
 	"codeberg.org/botfile/botfile/internal/agent"
@@ -167,8 +168,13 @@ type CmdNone struct{}
 // CmdLoadConfig asks the interpreter to load and validate the config at Path.
 type CmdLoadConfig struct{ Path string }
 
-// CmdScanSources asks the interpreter to scan each source's location.
-type CmdScanSources struct{ Sources []core.Source }
+// CmdScanSources asks the interpreter to scan each source's location. BaseDir is
+// the directory a relative source location resolves against (the config file's
+// directory), so resolution does not depend on the process working directory.
+type CmdScanSources struct {
+	Sources []core.Source
+	BaseDir string
+}
 
 // CmdReadWorld asks the interpreter to observe Targets and scan ManagedDirs.
 type CmdReadWorld struct {
@@ -221,7 +227,9 @@ func Update(m Model, msg Msg) (Model, Cmd) {
 		if cl, ok := msg.(ConfigLoaded); ok {
 			m.Config = cl.Config
 			m.Phase = PhaseScanning
-			return m, CmdScanSources{Sources: m.Config.Sources}
+			// Relative source locations resolve against the config's directory
+			// (filepath.Dir is a pure string op, no I/O).
+			return m, CmdScanSources{Sources: m.Config.Sources, BaseDir: filepath.Dir(m.ConfigPath)}
 		}
 
 	case PhaseScanning:

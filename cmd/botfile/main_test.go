@@ -57,6 +57,29 @@ func TestRenderBlockedShowsIssues(t *testing.T) {
 	}
 }
 
+func TestRenderPlanWithBlockersDoesNotInviteSync(t *testing.T) {
+	m := runtime.Model{
+		Mode:  runtime.ModePlan,
+		Phase: runtime.PhaseDone,
+		Plan:  reconcile.Plan{Ops: []reconcile.Op{{Kind: reconcile.OpCreate, Target: "/h/x", Dest: "/s/x"}}},
+		Blockers: []runtime.Blocker{
+			{Kind: runtime.BlockerConflict, Ref: "/h/y", Detail: "a non-symlink file already exists at this path"},
+		},
+	}
+	var buf bytes.Buffer
+	code := render(&buf, m)
+	if code != 1 {
+		t.Fatalf("plan with blockers exit = %d, want 1", code)
+	}
+	out := buf.String()
+	if strings.Contains(out, "run `botfile sync` to apply") {
+		t.Errorf("plan with blockers must not invite sync:\n%s", out)
+	}
+	if !strings.Contains(out, "would block sync") {
+		t.Errorf("plan with blockers should say it would block:\n%s", out)
+	}
+}
+
 func TestRenderFailed(t *testing.T) {
 	m := runtime.Model{Phase: runtime.PhaseFailed, FailedStage: "load-config", Err: errors.New("boom")}
 	var buf bytes.Buffer

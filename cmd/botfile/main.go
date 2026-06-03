@@ -98,9 +98,16 @@ func render(w io.Writer, m runtime.Model) int {
 	case runtime.PhaseDone:
 		if m.Mode == runtime.ModeSync {
 			fmt.Fprintf(w, "\nsynced: %d operation(s) applied\n", len(m.Plan.Ops))
-		} else {
-			fmt.Fprintf(w, "\nplan: %d operation(s) (run `botfile sync` to apply)\n", len(m.Plan.Ops))
+			return 0
 		}
+		// Plan mode is read-only, but a plan with blockers would not apply: say
+		// so and exit non-zero, so `botfile plan && botfile sync` does not chain
+		// into a sync that blocks.
+		if len(m.Blockers) > 0 {
+			fmt.Fprintf(w, "\nplan: %d operation(s), but %d issue(s) would block sync (resolve them first)\n", len(m.Plan.Ops), len(m.Blockers))
+			return 1
+		}
+		fmt.Fprintf(w, "\nplan: %d operation(s) (run `botfile sync` to apply)\n", len(m.Plan.Ops))
 		return 0
 	default:
 		fmt.Fprintf(w, "incomplete run (phase %d)\n", m.Phase)

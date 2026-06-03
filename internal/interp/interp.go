@@ -52,10 +52,12 @@ func OSDeps(home string) Deps {
 // resolveLocation turns a configured source location into an absolute local path
 // for scanning and as the planner root, or a typed problem when it cannot. A
 // remote (git URL) location is not yet supported and is reported, not fetched; a
-// leading ~ is expanded against Home; a relative path is made absolute, so a
-// config like location = "./team" syncs instead of producing relative
-// destinations the planner would reject as invalid-path.
-func (d Deps) resolveLocation(location string) (string, *source.Problem) {
+// leading ~ is expanded against Home; a relative path is resolved against base
+// (the config file's directory, not the process working directory), so a config
+// like location = "./team" resolves the same regardless of where botfile is
+// launched and never yields a relative destination the planner rejects as
+// invalid-path.
+func (d Deps) resolveLocation(base, location string) (string, *source.Problem) {
 	if isRemote(location) {
 		return location, &source.Problem{
 			Kind: source.ProblemUnreadable, Path: location,
@@ -68,6 +70,9 @@ func (d Deps) resolveLocation(location string) (string, *source.Problem) {
 		path = d.Home
 	case strings.HasPrefix(path, "~/"):
 		path = filepath.Join(d.Home, path[2:])
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(base, path)
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -132,7 +137,7 @@ func (d Deps) perform(cmd runtime.Cmd) runtime.Msg {
 		sources := make([]project.Source, 0, len(c.Sources))
 		var problems []source.Problem
 		for _, s := range c.Sources {
-			root, prob := d.resolveLocation(s.Location)
+			root, prob := d.resolveLocation(c.BaseDir, s.Location)
 			if prob != nil {
 				problems = append(problems, *prob)
 				// Record the source with no plugins; an unresolved location

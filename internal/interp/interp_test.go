@@ -108,25 +108,30 @@ func reinit(t *testing.T, prev runtime.Model) (runtime.Model, runtime.Cmd, strin
 func TestResolveLocation(t *testing.T) {
 	t.Parallel()
 	d := Deps{Home: "/home/u"}
+	const base = "/cfg"
 
-	if got, prob := d.resolveLocation("/abs/team"); prob != nil || got != "/abs/team" {
+	if got, prob := d.resolveLocation(base, "/abs/team"); prob != nil || got != "/abs/team" {
 		t.Errorf("abs: got %q prob %v, want /abs/team", got, prob)
 	}
-	if got, prob := d.resolveLocation("~/team"); prob != nil || got != "/home/u/team" {
+	if got, prob := d.resolveLocation(base, "~/team"); prob != nil || got != "/home/u/team" {
 		t.Errorf("tilde: got %q prob %v, want /home/u/team", got, prob)
 	}
-	if got, prob := d.resolveLocation("./team"); prob != nil || !filepath.IsAbs(got) {
-		t.Errorf("relative: got %q prob %v, want an absolute path", got, prob)
+	// A relative location resolves against base (the config dir), NOT the CWD.
+	if got, prob := d.resolveLocation(base, "./team"); prob != nil || got != "/cfg/team" {
+		t.Errorf("relative ./team: got %q prob %v, want /cfg/team", got, prob)
+	}
+	if got, prob := d.resolveLocation(base, "team"); prob != nil || got != "/cfg/team" {
+		t.Errorf("relative team: got %q prob %v, want /cfg/team", got, prob)
 	}
 	for _, url := range []string{"git@codeberg.org:botfile/team.git", "https://example.com/team.git", "ssh://host/team"} {
-		if _, prob := d.resolveLocation(url); prob == nil {
+		if _, prob := d.resolveLocation(base, url); prob == nil {
 			t.Errorf("remote %q: want an unsupported-source problem, got none", url)
 		}
 	}
 }
 
 func TestEndToEndSyncWithRelativeSourcePath(t *testing.T) {
-	// A relative source location must resolve to an absolute path and sync, not
+	// A source location relative to the config file must resolve and sync, not
 	// produce relative destinations the planner rejects as invalid-path.
 	model, cmd, home := setupRelative(t)
 	final := OSDeps(home).Run(model, cmd)
@@ -137,7 +142,7 @@ func TestEndToEndSyncWithRelativeSourcePath(t *testing.T) {
 }
 
 // setupRelative is like setup but writes the source location as a path relative
-// to the test's working directory, so resolveLocation must make it absolute.
+// to the config file's directory, so resolveLocation must join it to that base.
 func setupRelative(t *testing.T) (runtime.Model, runtime.Cmd, string) {
 	t.Helper()
 	tmp := t.TempDir()
@@ -145,16 +150,11 @@ func setupRelative(t *testing.T) (runtime.Model, runtime.Cmd, string) {
 	home := filepath.Join(tmp, "home")
 	writeFile(t, filepath.Join(src, "coding", "skills", "go-style", "SKILL.md"), "# go style")
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	rel, err := filepath.Rel(cwd, src)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	configPath := filepath.Join(tmp, "config.toml")
+	rel, err := filepath.Rel(filepath.Dir(configPath), src) // "src/team", relative to the config dir
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, configPath, ""+
 		"[[sources]]\n"+
 		"name = \"team\"\n"+
