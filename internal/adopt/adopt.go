@@ -54,6 +54,10 @@ const (
 	// ProblemCollision: the source/plugin already has a component of this
 	// kind and name.
 	ProblemCollision
+	// ProblemSourceUnscannable: the target source could not be scanned cleanly,
+	// so the collision preflight cannot be trusted; adopt refuses rather than
+	// risk a blind move into a half-known source.
+	ProblemSourceUnscannable
 )
 
 // Problem is a typed reason a request cannot be adopted.

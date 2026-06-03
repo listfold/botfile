@@ -137,11 +137,11 @@ func (d Deps) perform(cmd runtime.Cmd) runtime.Msg {
 
 	case runtime.CmdScanSources:
 		sources := make([]project.Source, 0, len(c.Sources))
-		var problems []source.Problem
+		var problems []runtime.ScanProblem
 		for _, s := range c.Sources {
 			root, prob := d.resolveLocation(c.BaseDir, s.Location)
 			if prob != nil {
-				problems = append(problems, *prob)
+				problems = append(problems, runtime.ScanProblem{Source: s.Name, Problem: *prob})
 				// Record the source with no plugins; an unresolved location
 				// contributes nothing and blocks via the scan problem.
 				sources = append(sources, project.Source{Name: s.Name, Root: root})
@@ -149,7 +149,11 @@ func (d Deps) perform(cmd runtime.Cmd) runtime.Msg {
 			}
 			res := d.ScanSource(root)
 			sources = append(sources, project.Source{Name: s.Name, Root: root, Plugins: res.Plugins})
-			problems = append(problems, res.Problems...)
+			// Tag every problem with the source it came from, so adopt can block on
+			// its own target source without an unrelated broken source stopping it.
+			for _, p := range res.Problems {
+				problems = append(problems, runtime.ScanProblem{Source: s.Name, Problem: p})
+			}
 		}
 		return runtime.SourcesScanned{Sources: sources, Problems: problems}
 

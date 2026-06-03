@@ -18,6 +18,7 @@
 package runtime
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 
@@ -126,7 +127,7 @@ type Model struct {
 	// Accumulated state.
 	Config       core.Config
 	Sources      []project.Source
-	ScanProblems []source.Problem
+	ScanProblems []ScanProblem
 	Projection   project.Result
 	Plan         reconcile.Plan
 	Blockers     []Blocker
@@ -146,7 +147,17 @@ type ConfigLoaded struct{ Config core.Config }
 // SourcesScanned delivers the scanned sources and any source-grammar problems.
 type SourcesScanned struct {
 	Sources  []project.Source
-	Problems []source.Problem
+	Problems []ScanProblem
+}
+
+// ScanProblem is a source-grammar problem tagged with the configured source it
+// came from. The tag lets a consumer block on the right scope: sync and status
+// block on any source problem (the desired model is incomplete), while adopt
+// blocks only on problems in its own target source, so an unrelated broken
+// source does not stop an otherwise-valid adopt.
+type ScanProblem struct {
+	Source  string
+	Problem source.Problem
 }
 
 // WorldRead delivers the observed filesystem state.
@@ -263,11 +274,26 @@ func Update(m Model, msg Msg) (Model, Cmd) {
 			m.Sources = ss.Sources
 			m.ScanProblems = ss.Problems
 			if m.Mode == ModeAdopt {
+				// adopt's collision preflight trusts the scanned contents of the
+				// target source, so a source that did not scan cleanly cannot be
+				// adopted into: refuse here rather than risk a blind move whose
+				// collision check missed a skipped entry. Only the target source
+				// blocks; an unrelated broken source is irrelevant to this adopt.
+				if sp := scanProblemForSource(m.ScanProblems, m.Adopt.SourceName); sp != nil {
+					m.AdoptProblem = &adopt.Problem{
+						Kind:   adopt.ProblemSourceUnscannable,
+						Detail: fmt.Sprintf("source %q did not scan cleanly (%s: %s)", m.Adopt.SourceName, sp.Problem.Path, sp.Problem.Detail),
+					}
+					m.Phase = PhaseBlocked
+					return m, CmdNone{}
+				}
 				// adopt needs the scanned sources (roots and collision data) and the
 				// discovered components to validate the request; it skips the
-				// reconcile pipeline.
+				// reconcile pipeline. Discovery scans every supported agent namespace
+				// (not just those a selection already names), so a first adopt can
+				// bootstrap a config that has sources but no selections yet.
 				m.Phase = PhaseDiscovering
-				return m, CmdDiscover{Namespaces: managedNamespaces(m.Config, m.Agents, m.Roots)}
+				return m, CmdDiscover{Namespaces: allNamespaces(m.Agents, m.Roots)}
 			}
 			// Pure: expand selections over the scanned sources and the matrix.
 			m.Projection = project.Project(m.Config, m.Sources, m.Agents, m.Roots)
@@ -346,7 +372,7 @@ func (m Model) Done() bool {
 func blockers(m Model) []Blocker {
 	var bs []Blocker
 	for _, p := range m.ScanProblems {
-		bs = append(bs, Blocker{Kind: BlockerScanProblem, Ref: p.Path, Detail: p.Detail})
+		bs = append(bs, Blocker{Kind: BlockerScanProblem, Ref: p.Problem.Path, Detail: p.Problem.Detail})
 	}
 	for _, p := range m.Projection.Problems {
 		if p.Kind == project.ProblemUnsupported {
@@ -421,10 +447,22 @@ func managedDirs(cfg core.Config, agents agent.Set, roots map[core.AgentID]strin
 	return dirs
 }
 
-// managedNamespaces returns the namespaces to scan for unmanaged components, one
-// per directory. A directory shared by several agents (for example
-// ~/.agents/skills) is scanned once but carries every agent that reads it, so a
-// component found there is attributed to all of them, not just one.
+// scanProblemForSource returns the first scan problem attributed to the named
+// source, or nil if that source scanned cleanly. It lets adopt block on its own
+// target source without being stopped by an unrelated broken source.
+func scanProblemForSource(problems []ScanProblem, source string) *ScanProblem {
+	for i := range problems {
+		if problems[i].Source == source {
+			return &problems[i]
+		}
+	}
+	return nil
+}
+
+// managedNamespaces returns the namespaces to scan for unmanaged components in a
+// config-scoped run (status orphan discovery): only the agents some selection
+// already names. A first sync has nothing to manage, so scanning every agent
+// would surface noise the user never opted into.
 func managedNamespaces(cfg core.Config, agents agent.Set, roots map[core.AgentID]string) []discover.Namespace {
 	usedSet := make(map[core.AgentID]bool)
 	for _, sel := range cfg.Selections {
@@ -436,6 +474,23 @@ func managedNamespaces(cfg core.Config, agents agent.Set, roots map[core.AgentID
 	for id := range usedSet {
 		used = append(used, id)
 	}
+	return namespacesFor(used, agents, roots)
+}
+
+// allNamespaces returns the namespaces to scan across every agent in the matrix,
+// regardless of the current selections. adopt uses this so a first adopt can
+// bootstrap a config that has sources but no selections yet (the agent that
+// created the component need not already be selected).
+func allNamespaces(agents agent.Set, roots map[core.AgentID]string) []discover.Namespace {
+	return namespacesFor(agents.IDs(), agents, roots)
+}
+
+// namespacesFor returns the namespaces to scan for the given agent ids, one per
+// (kind, directory). A directory shared by several agents (for example
+// ~/.agents/skills) is scanned once but carries every agent that reads it, so a
+// component found there is attributed to all of them, not just one.
+func namespacesFor(ids []core.AgentID, agents agent.Set, roots map[core.AgentID]string) []discover.Namespace {
+	used := append([]core.AgentID(nil), ids...) // copy: do not reorder the caller's slice
 	sort.Slice(used, func(i, j int) bool { return used[i] < used[j] })
 
 	// Key by (kind, directory), not directory alone: a custom matrix could map

@@ -182,6 +182,45 @@ func TestEndToEndAdopt(t *testing.T) {
 	}
 }
 
+func TestEndToEndAdoptBootstrapsWithoutSelections(t *testing.T) {
+	// A first adopt against a config that declares a source but has NO selections
+	// yet must still work: discovery scans every supported agent namespace, not
+	// just those a selection already names, so the agent-created skill is found and
+	// the very first selection is written.
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src", "personal")
+	home := filepath.Join(tmp, "home")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(home, ".claude", "skills", "bark-pro", "SKILL.md"), "woof")
+
+	configPath := filepath.Join(tmp, "config.toml")
+	writeFile(t, configPath, "[[sources]]\nname = \"personal\"\nlocation = \""+src+"\"\n")
+
+	agents := agent.Default()
+	roots := agents.ResolveRoots(home, func(string) string { return "" })
+	model, cmd := runtime.Init(runtime.ModeAdopt, configPath, home, agents, roots)
+	model.Adopt = adopt.Request{
+		Path:       filepath.Join(home, ".claude", "skills", "bark-pro"),
+		SourceName: "personal", PluginName: "mine",
+	}
+	final := OSDeps(home).Run(model, cmd)
+	if final.Phase != runtime.PhaseDone {
+		t.Fatalf("phase = %v (err %v, stage %q, problem %+v)", final.Phase, final.Err, final.FailedStage, final.AdoptProblem)
+	}
+	if e, _ := (fsport.OS{}).Lstat(filepath.Join(src, "mine", "skills", "bark-pro", "SKILL.md")); !e.IsRegular {
+		t.Fatal("skill was not moved into the source")
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Selections) != 1 || cfg.Selections[0].ComponentID != "skill/bark-pro" {
+		t.Fatalf("config did not gain the first selection: %+v", cfg.Selections)
+	}
+}
+
 // reinit rebuilds the initial model+cmd reusing the prior run's seeded inputs, so
 // a second sync runs against the filesystem the first one produced.
 func reinit(t *testing.T, prev runtime.Model) (runtime.Model, runtime.Cmd, string) {

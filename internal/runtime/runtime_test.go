@@ -129,7 +129,7 @@ func TestSyncBlocksOnConflict(t *testing.T) {
 func TestBlockersClassifyAllIncompleteModelCauses(t *testing.T) {
 	t.Parallel()
 	m := Model{
-		ScanProblems: []source.Problem{{Kind: source.ProblemSkillMissingManifest, Path: "p/skills/x", Detail: "no SKILL.md"}},
+		ScanProblems: []ScanProblem{{Source: "p", Problem: source.Problem{Kind: source.ProblemSkillMissingManifest, Path: "p/skills/x", Detail: "no SKILL.md"}}},
 		Projection: project.Result{Problems: []project.Problem{
 			{Kind: project.ProblemEmptySelection, SourceName: "team", Detail: "matched nothing"},
 			{Kind: project.ProblemUnsupported, SourceName: "team", Agent: core.AgentCodexCLI, Component: "memory/x", Detail: "unsupported"},
@@ -193,7 +193,7 @@ func TestSyncBlocksOnScanProblem(t *testing.T) {
 	m, _ = Update(m, ConfigLoaded{Config: testConfig()})
 	m, _ = Update(m, SourcesScanned{
 		Sources:  []project.Source{scannedTeam()},
-		Problems: []source.Problem{{Kind: source.ProblemSkillMissingManifest, Path: "coding/skills/broken", Detail: "no SKILL.md"}},
+		Problems: []ScanProblem{{Source: "team", Problem: source.Problem{Kind: source.ProblemSkillMissingManifest, Path: "coding/skills/broken", Detail: "no SKILL.md"}}},
 	})
 	m, cmd := Update(m, WorldRead{World: reconcile.World{Entries: map[string]reconcile.Entry{}}})
 	if _, ok := cmd.(CmdApply); ok {
@@ -380,6 +380,44 @@ func TestAdoptRunBlocksOnProblem(t *testing.T) {
 	}
 	if m.AdoptProblem == nil || m.AdoptProblem.Kind != adopt.ProblemNotAdoptable {
 		t.Fatalf("AdoptProblem = %+v, want not-adoptable", m.AdoptProblem)
+	}
+}
+
+func TestAdoptBlocksOnTargetSourceScanProblem(t *testing.T) {
+	t.Parallel()
+	// The target source did not scan cleanly, so the collision preflight cannot be
+	// trusted. adopt must block right after scanning (a typed source problem), and
+	// never reach discovery or emit an apply command.
+	m, _ := newModel(t, ModeAdopt)
+	m.Adopt = adopt.Request{Path: "/home/u/.claude/skills/bark", SourceName: "team", PluginName: "mine"}
+	m, _ = Update(m, ConfigLoaded{Config: testConfig()})
+
+	m, cmd := Update(m, SourcesScanned{
+		Sources:  []project.Source{scannedTeam()},
+		Problems: []ScanProblem{{Source: "team", Problem: source.Problem{Kind: source.ProblemSkillMissingManifest, Path: "mine/skills/bark", Detail: "no SKILL.md"}}},
+	})
+	if _, ok := cmd.(CmdNone); !ok || m.Phase != PhaseBlocked {
+		t.Fatalf("adopt with a broken target source = phase %v cmd %T, want Blocked + CmdNone", m.Phase, cmd)
+	}
+	if m.AdoptProblem == nil || m.AdoptProblem.Kind != adopt.ProblemSourceUnscannable {
+		t.Fatalf("AdoptProblem = %+v, want source-unscannable", m.AdoptProblem)
+	}
+}
+
+func TestAdoptIgnoresUnrelatedSourceScanProblem(t *testing.T) {
+	t.Parallel()
+	// A scan problem in a source other than the adopt target must not block: only
+	// the target source's cleanliness matters to this adopt.
+	m, _ := newModel(t, ModeAdopt)
+	m.Adopt = adopt.Request{Path: "/home/u/.claude/skills/bark", SourceName: "team", PluginName: "mine"}
+	m, _ = Update(m, ConfigLoaded{Config: testConfig()})
+
+	m, cmd := Update(m, SourcesScanned{
+		Sources:  []project.Source{scannedTeam()},
+		Problems: []ScanProblem{{Source: "other", Problem: source.Problem{Kind: source.ProblemSkillMissingManifest, Path: "x/skills/y", Detail: "no SKILL.md"}}},
+	})
+	if _, ok := cmd.(CmdDiscover); !ok || m.Phase != PhaseDiscovering {
+		t.Fatalf("adopt with only an unrelated broken source = phase %v cmd %T, want Discovering + CmdDiscover", m.Phase, cmd)
 	}
 }
 
