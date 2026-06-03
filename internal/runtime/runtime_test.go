@@ -337,6 +337,42 @@ func TestManagedNamespacesDedupesSharedDir(t *testing.T) {
 	}
 }
 
+func TestManagedNamespacesKeysByKindNotJustDir(t *testing.T) {
+	t.Parallel()
+	// A custom matrix that maps both skill and memory to the same directory must
+	// yield two distinct namespaces, not one merged by directory.
+	set, err := agent.NewSet(agent.Spec{
+		ID:   core.AgentOpenCode,
+		Base: agent.Base{HomeRelative: []string{".oc"}},
+		Rules: map[core.Kind]agent.InstallRule{
+			core.KindSkill:  {Tier: agent.Tier1, Segments: []string{"shared"}, Shape: agent.LeafDir},
+			core.KindMemory: {Tier: agent.Tier1, Segments: []string{"shared"}, Shape: agent.LeafFile, Ext: ".md"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSet: %v", err)
+	}
+	cfg := core.Config{
+		Sources: []core.Source{{Name: "team", Location: "/src/team"}},
+		Selections: []core.Selection{{
+			SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
+			Agents: []core.AgentID{core.AgentOpenCode},
+		}},
+	}
+	ns := managedNamespaces(cfg, set, set.ResolveRoots("/home/u", noEnv))
+
+	if len(ns) != 2 {
+		t.Fatalf("namespaces = %+v, want 2 (skill and memory at the same dir)", ns)
+	}
+	// Same directory, distinct kinds, sorted by kind (memory < skill).
+	if ns[0].Dir != "/home/u/.oc/shared" || ns[1].Dir != "/home/u/.oc/shared" {
+		t.Fatalf("dirs = %q, %q, want both /home/u/.oc/shared", ns[0].Dir, ns[1].Dir)
+	}
+	if ns[0].Kind != core.KindMemory || ns[1].Kind != core.KindSkill {
+		t.Fatalf("kinds = %q, %q, want memory then skill", ns[0].Kind, ns[1].Kind)
+	}
+}
+
 func TestFailedStops(t *testing.T) {
 	t.Parallel()
 	m, _ := newModel(t, ModeSync)

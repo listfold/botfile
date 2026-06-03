@@ -405,7 +405,14 @@ func managedNamespaces(cfg core.Config, agents agent.Set, roots map[core.AgentID
 	}
 	sort.Slice(used, func(i, j int) bool { return used[i] < used[j] })
 
-	byDir := make(map[string]int) // dir -> index into ns
+	// Key by (kind, directory), not directory alone: a custom matrix could map
+	// two kinds to the same directory, and those are distinct namespaces. Agents
+	// that share a (kind, directory) are still accumulated onto one namespace.
+	type key struct {
+		kind core.Kind
+		dir  string
+	}
+	byKey := make(map[key]int) // (kind, dir) -> index into ns
 	var ns []discover.Namespace
 	for _, id := range used {
 		ag, ok := agents.Lookup(id)
@@ -417,14 +424,20 @@ func managedNamespaces(cfg core.Config, agents agent.Set, roots map[core.AgentID
 			if !ok {
 				continue
 			}
-			if i, exists := byDir[dir]; exists {
+			k := key{kind, dir}
+			if i, exists := byKey[k]; exists {
 				ns[i].Agents = append(ns[i].Agents, id)
 				continue
 			}
-			byDir[dir] = len(ns)
+			byKey[k] = len(ns)
 			ns = append(ns, discover.Namespace{Agents: []core.AgentID{id}, Kind: kind, Dir: dir})
 		}
 	}
-	sort.Slice(ns, func(i, j int) bool { return ns[i].Dir < ns[j].Dir })
+	sort.Slice(ns, func(i, j int) bool {
+		if ns[i].Dir != ns[j].Dir {
+			return ns[i].Dir < ns[j].Dir
+		}
+		return ns[i].Kind < ns[j].Kind
+	})
 	return ns
 }
