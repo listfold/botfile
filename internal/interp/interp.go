@@ -51,8 +51,9 @@ func OSDeps(home string) Deps {
 
 // resolveLocation turns a configured source location into an absolute local path
 // for scanning and as the planner root, or a typed problem when it cannot. A
-// remote (git URL) location is not yet supported and is reported, not fetched; a
-// leading ~ is expanded against Home; a relative path is resolved against base
+// remote (git URL) location is rejected: botfile does not clone, by design (that
+// is git's job, manifesto 29-30); a leading ~ is expanded against Home; a
+// relative path is resolved against base
 // (the config file's directory, not the process working directory), so a config
 // like location = "./team" resolves the same regardless of where botfile is
 // launched and never yields a relative destination the planner rejects as
@@ -61,7 +62,7 @@ func (d Deps) resolveLocation(base, location string) (string, *source.Problem) {
 	if isRemote(location) {
 		return location, &source.Problem{
 			Kind: source.ProblemUnreadable, Path: location,
-			Detail: "remote (git URL) sources are not yet supported; clone it locally and point the source at the path",
+			Detail: "botfile does not clone repositories (that is git's job); clone it and set the source location to the local path",
 		}
 	}
 	path := location
