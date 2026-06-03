@@ -1,13 +1,13 @@
 // Package discover finds components installed in an agent's namespace that
-// botfile does not manage: real (non-symlink) skills and memories an agent or
+// botfile does not manage: real (non-symlink) skills and instructions an agent or
 // the user created in place. These are candidates for adoption (manifesto 36),
 // the read side of the create-then-manage loop.
 //
 // A botfile-managed component is always a symlink into a source, so any real
 // component-shaped entry in a managed namespace is by definition unmanaged.
 // Discovery therefore classifies by shape (a directory with SKILL.md is a skill,
-// a <name>.md file is a memory) and ignores every symlink, botfile's own and the
-// user's alike.
+// a <name>.md file is an instruction) and ignores every symlink, botfile's own
+// and the user's alike.
 package discover
 
 import (
@@ -90,15 +90,15 @@ func classify(fsys fsport.FS, ns Namespace, name, path string, entry fsport.Entr
 		}
 		return Unmanaged{Agents: ns.Agents, Kind: core.KindSkill, Name: name, Path: path}, true
 
-	case core.KindMemory:
+	case core.KindInstruction:
 		if !entry.IsRegular {
-			return Unmanaged{}, false // a memory is a regular file (manifesto 48)
+			return Unmanaged{}, false // an instruction is a regular file (manifesto 48)
 		}
-		mname, ok := source.MemoryName(name)
-		if !ok || core.ValidateName("memory name", mname) != nil {
+		iname, ok := source.InstructionName(name)
+		if !ok || core.ValidateName("instruction name", iname) != nil {
 			return Unmanaged{}, false
 		}
-		return Unmanaged{Agents: ns.Agents, Kind: core.KindMemory, Name: mname, Path: path}, true
+		return Unmanaged{Agents: ns.Agents, Kind: core.KindInstruction, Name: iname, Path: path}, true
 
 	default:
 		return Unmanaged{}, false

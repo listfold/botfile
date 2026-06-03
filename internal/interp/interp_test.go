@@ -31,9 +31,9 @@ func setup(t *testing.T, mode runtime.Mode) (runtime.Model, runtime.Cmd, string)
 	src := filepath.Join(tmp, "src", "team")
 	home := filepath.Join(tmp, "home")
 
-	// A source: one skill (directory + SKILL.md) and one memory (a .md file).
+	// A source: one skill (directory + SKILL.md) and one instruction (a .md file).
 	writeFile(t, filepath.Join(src, "coding", "skills", "go-style", "SKILL.md"), "# go style")
-	writeFile(t, filepath.Join(src, "coding", "memories", "style.md"), "be terse")
+	writeFile(t, filepath.Join(src, "coding", "instructions", "style.md"), "be terse")
 
 	configPath := filepath.Join(tmp, "config.toml")
 	writeFile(t, configPath, ""+

@@ -23,9 +23,9 @@ func TestDefaultClaudeCodeTargets(t *testing.T) {
 	if !ok || skill != "/home/u/.claude/skills/go-style" {
 		t.Errorf("skill target = %q,%v, want /home/u/.claude/skills/go-style", skill, ok)
 	}
-	mem, ok := ag.Target(root, core.KindMemory, "style")
-	if !ok || mem != "/home/u/.claude/rules/style.md" {
-		t.Errorf("memory target = %q,%v, want /home/u/.claude/rules/style.md", mem, ok)
+	instr, ok := ag.Target(root, core.KindInstruction, "style")
+	if !ok || instr != "/home/u/.claude/rules/style.md" {
+		t.Errorf("instruction target = %q,%v, want /home/u/.claude/rules/style.md", instr, ok)
 	}
 }
 
@@ -59,8 +59,8 @@ func TestResolveRoots(t *testing.T) {
 func TestSupportsAndUnsupported(t *testing.T) {
 	t.Parallel()
 	ag, _ := Default().Lookup(core.AgentClaudeCode)
-	if !ag.Supports(core.KindSkill) || !ag.Supports(core.KindMemory) {
-		t.Error("claude-code should support skill and memory")
+	if !ag.Supports(core.KindSkill) || !ag.Supports(core.KindInstruction) {
+		t.Error("claude-code should support skill and instruction")
 	}
 	if _, ok := ag.Target("/root", core.Kind("hook"), "x"); ok {
 		t.Error("an unspecified kind must report unsupported")
@@ -91,9 +91,9 @@ func TestCodexAndCopilotSkillsOnly(t *testing.T) {
 		if !ok || skill != tc.wantRoot+"/skills/deploy" {
 			t.Errorf("%s skill target = %q,%v, want %s/skills/deploy", tc.id, skill, ok, tc.wantRoot)
 		}
-		// Memory stays unsupported for codex and copilot (manifesto 18).
-		if ag.Supports(core.KindMemory) {
-			t.Errorf("%s must not support memory (manifesto 18)", tc.id)
+		// Instructions stay unsupported for codex and copilot (manifesto 18).
+		if ag.Supports(core.KindInstruction) {
+			t.Errorf("%s must not support instruction (manifesto 18)", tc.id)
 		}
 	}
 }
@@ -178,7 +178,7 @@ func TestNewAgentValidation(t *testing.T) {
 			s.Rules = map[core.Kind]InstallRule{core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir, Ext: ".md"}}
 		}},
 		{"file without ext", func(s *Spec) {
-			s.Rules = map[core.Kind]InstallRule{core.KindMemory: {Tier: Tier1, Segments: []string{"rules"}, Shape: LeafFile}}
+			s.Rules = map[core.Kind]InstallRule{core.KindInstruction: {Tier: Tier1, Segments: []string{"rules"}, Shape: LeafFile}}
 		}},
 		{"bad tier", func(s *Spec) {
 			s.Rules = map[core.Kind]InstallRule{core.KindSkill: {Tier: 9, Segments: []string{"skills"}, Shape: LeafDir}}

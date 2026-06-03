@@ -21,7 +21,7 @@ const (
 	// (core.ValidateName): whitespace, a separator, or the wildcard token.
 	ProblemInvalidName
 	// ProblemUnknownKindDir: a directory under a plugin is not a recognized kind
-	// directory (manifesto 47: skills/, memories/).
+	// directory (manifesto 47: skills/, instructions/).
 	ProblemUnknownKindDir
 	// ProblemStraySkillFile: a non-directory entry sits directly under skills/,
 	// where a skill must be a directory (manifesto 48).
@@ -29,9 +29,9 @@ const (
 	// ProblemSkillMissingManifest: a skill directory has no SKILL.md (manifesto
 	// 17, 48).
 	ProblemSkillMissingManifest
-	// ProblemMemoryNotMarkdown: an entry under memories/ is not a regular .md
-	// file (manifesto 48).
-	ProblemMemoryNotMarkdown
+	// ProblemInstructionNotMarkdown: an entry under instructions/ is not a regular
+	// .md file (manifesto 48).
+	ProblemInstructionNotMarkdown
 	// ProblemHiddenComponent: a hidden (dotfile) entry sits directly under a kind
 	// directory, where entries are component candidates, so it is reported rather
 	// than silently skipped.
@@ -51,8 +51,8 @@ func (k ProblemKind) String() string {
 		return "stray-skill-file"
 	case ProblemSkillMissingManifest:
 		return "skill-missing-manifest"
-	case ProblemMemoryNotMarkdown:
-		return "memory-not-markdown"
+	case ProblemInstructionNotMarkdown:
+		return "instruction-not-markdown"
 	case ProblemHiddenComponent:
 		return "hidden-component"
 	default:
@@ -135,7 +135,7 @@ func scanPlugin(fsys fs.FS, name string, res *Result) {
 		if !ok {
 			res.Problems = append(res.Problems, Problem{
 				Kind: ProblemUnknownKindDir, Path: path.Join(name, e.Name()),
-				Detail: "not a recognized kind directory (expected skills/ or memories/)",
+				Detail: "not a recognized kind directory (expected skills/ or instructions/)",
 			})
 			continue
 		}
@@ -169,8 +169,8 @@ func scanKind(fsys fs.FS, pluginName, kindDir string, kind core.Kind, plugin *co
 		switch kind {
 		case core.KindSkill:
 			scanSkill(fsys, base, e, plugin, res)
-		case core.KindMemory:
-			scanMemory(base, e, plugin, res)
+		case core.KindInstruction:
+			scanInstruction(base, e, plugin, res)
 		}
 	}
 }
@@ -205,22 +205,22 @@ func scanSkill(fsys fs.FS, base string, e fs.DirEntry, plugin *core.Plugin, res 
 	plugin.Components = append(plugin.Components, comp)
 }
 
-// scanMemory validates one entry under memories/: it must be a <name>.md file
-// (manifesto 48).
-func scanMemory(base string, e fs.DirEntry, plugin *core.Plugin, res *Result) {
+// scanInstruction validates one entry under instructions/: it must be a
+// <name>.md file (manifesto 48).
+func scanInstruction(base string, e fs.DirEntry, plugin *core.Plugin, res *Result) {
 	entryPath := path.Join(base, e.Name())
-	// A memory must be a regular .md file: not a directory, symlink, or other
-	// special entry (manifesto 48). DirEntry.Type does not follow symlinks, so a
-	// symlink entry is correctly rejected as non-regular.
-	name, ok := MemoryName(e.Name())
+	// An instruction must be a regular .md file: not a directory, symlink, or
+	// other special entry (manifesto 48). DirEntry.Type does not follow symlinks,
+	// so a symlink entry is correctly rejected as non-regular.
+	name, ok := InstructionName(e.Name())
 	if !e.Type().IsRegular() || !ok {
 		res.Problems = append(res.Problems, Problem{
-			Kind: ProblemMemoryNotMarkdown, Path: entryPath,
-			Detail: "a memory must be a regular " + memoryExt + " file",
+			Kind: ProblemInstructionNotMarkdown, Path: entryPath,
+			Detail: "an instruction must be a regular " + instructionExt + " file",
 		})
 		return
 	}
-	comp := core.Component{Kind: core.KindMemory, Name: name}
+	comp := core.Component{Kind: core.KindInstruction, Name: name}
 	if err := comp.Validate(); err != nil {
 		res.Problems = append(res.Problems, Problem{Kind: ProblemInvalidName, Path: entryPath, Detail: err.Error()})
 		return

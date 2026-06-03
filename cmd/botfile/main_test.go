@@ -24,7 +24,7 @@ func TestRenderSyncDoneShowsOpsAndInfo(t *testing.T) {
 		},
 		Projection: project.Result{
 			Notices:  []project.Notice{{Selected: []core.AgentID{"copilot-cli"}, AlsoReaches: []core.AgentID{"codex-cli"}, Namespace: "/h/.agents/skills"}},
-			Problems: []project.Problem{{Kind: project.ProblemUnsupported, Agent: "codex-cli", Component: "memory/x", Detail: "no memory support"}},
+			Problems: []project.Problem{{Kind: project.ProblemUnsupported, Agent: "codex-cli", Component: "instruction/x", Detail: "no instruction support"}},
 		},
 	}
 	var buf bytes.Buffer
@@ -32,7 +32,7 @@ func TestRenderSyncDoneShowsOpsAndInfo(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	out := buf.String()
-	for _, want := range []string{"create", "/h/.claude/skills/go -> /src/skills/go", "note", "shadowed", "skipped", "memory/x", "synced: 1 operation"} {
+	for _, want := range []string{"create", "/h/.claude/skills/go -> /src/skills/go", "note", "shadowed", "skipped", "instruction/x", "synced: 1 operation"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render output missing %q\n%s", want, out)
 		}
@@ -92,7 +92,7 @@ func TestRenderStatus(t *testing.T) {
 				{Target: "/h/.claude/skills/missing", Dest: "/s/missing", SourceName: "team"},
 			},
 			Notices:  []project.Notice{{Selected: []core.AgentID{"copilot-cli"}, AlsoReaches: []core.AgentID{"codex-cli"}, Namespace: "/h/.agents/skills"}},
-			Problems: []project.Problem{{Kind: project.ProblemUnsupported, Agent: "codex-cli", Component: "memory/x", Detail: "no memory support"}},
+			Problems: []project.Problem{{Kind: project.ProblemUnsupported, Agent: "codex-cli", Component: "instruction/x", Detail: "no instruction support"}},
 		},
 		Plan: reconcile.Plan{
 			Ops:     []reconcile.Op{{Kind: reconcile.OpCreate, Target: "/h/.claude/skills/missing", Dest: "/s/missing"}},
@@ -110,7 +110,7 @@ func TestRenderStatus(t *testing.T) {
 	for _, want := range []string{
 		"managed (1)", "/h/.claude/skills/managed", // managed = the no-op link
 		"out of sync (1)", "create", // missing = drift
-		"notes", "note", "shadowed", "skipped", "memory/x", // non-blocking outcomes are shown
+		"notes", "note", "shadowed", "skipped", "instruction/x", // non-blocking outcomes are shown
 		"adoptable (1)", "skill/bark-pro", "codex-cli,copilot-cli", // both reading agents
 		"1 managed, 1 out of sync, 1 skipped, 1 adoptable", // skipped surfaced in the summary
 	} {

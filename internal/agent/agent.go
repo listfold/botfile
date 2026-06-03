@@ -40,8 +40,8 @@ const (
 )
 
 // LeafShape is how a component's installed entry is named in the agent's
-// namespace: a directory named <name> (a skill) or a file <name><ext> (a
-// memory), per manifesto 48.
+// namespace: a directory named <name> (a skill) or a file <name><ext> (an
+// instruction), per manifesto 48.
 type LeafShape int
 
 const (
@@ -140,7 +140,7 @@ func (a Agent) Namespace(root string, kind core.Kind) (string, bool) {
 // Target returns the absolute install path for a component of kind/name given
 // the agent's already-resolved config root, and whether the agent supports that
 // kind. The path is the kind's native per-kind directory under root plus the
-// component leaf: a directory for a skill, a <name><ext> file for a memory
+// component leaf: a directory for a skill, a <name><ext> file for an instruction
 // (manifesto 48).
 func (a Agent) Target(root string, kind core.Kind, name string) (string, bool) {
 	rule, ok := a.rules[kind]
@@ -276,11 +276,15 @@ func NewSet(specs ...Spec) (Set, error) {
 // and pi.dev also reads ~/.pi/agent/skills; we install to the shared dir on
 // purpose, to stay on the cross-agent convention.
 //
-// Memory is specified only for claude-code (tier 1). codex-cli memory is
-// unsupported (a single merged AGENTS.md, no per-file surface; manifesto 18).
-// copilot-cli memory is tier-2-supportable via COPILOT_CUSTOM_INSTRUCTIONS_DIRS
-// (manifesto 18, 23) but is not yet in the matrix, pending a tier-2 registration
-// mechanism. copilot-vscode is pending vendor confirmation.
+// Instructions (manifesto 18) are specified only for claude-code, which exposes
+// a drop-in directory of one file per instruction (~/.claude/rules/, tier 1).
+// Every other agent's user-scope instruction surface is a single fixed file
+// (codex-cli ~/.codex/AGENTS.md, opencode ~/.config/opencode/AGENTS.md, pi.dev
+// ~/.pi/agent/AGENTS.md, copilot-cli ~/.copilot/copilot-instructions.md), which
+// botfile cannot fan out into without clobbering a user-authored file; those are
+// reached by adoption (manifesto 50), not a distribution rule, so they are absent
+// here. copilot-vscode is pending vendor confirmation. See
+// callouts/instructions-are-one-kind-distribute-or-adopt.md.
 func Default() Set {
 	set, err := NewSet(
 		Spec{
@@ -290,9 +294,9 @@ func Default() Set {
 				// claude-code scans <root>/skills/<skill>/ (agentskills.io); tier 1
 				// auto-discovery (manifesto 22).
 				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
-				// claude-code reads <root>/rules/<name>.md as part of init; tier 1
-				// (manifesto 18, 22).
-				core.KindMemory: {Tier: Tier1, Segments: []string{"rules"}, Shape: LeafFile, Ext: ".md"},
+				// claude-code reads <root>/rules/<name>.md as part of init: a drop-in
+				// directory of one file per instruction; tier 1 (manifesto 18, 22).
+				core.KindInstruction: {Tier: Tier1, Segments: []string{"rules"}, Shape: LeafFile, Ext: ".md"},
 			},
 		},
 		Spec{

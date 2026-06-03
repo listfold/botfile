@@ -67,7 +67,7 @@ func TestPlanRunReachesDoneWithAPlan(t *testing.T) {
 	if len(rw.Targets) != 1 || rw.Targets[0] != "/home/u/.claude/skills/go-style" {
 		t.Fatalf("read-world targets = %v", rw.Targets)
 	}
-	// Managed dirs include claude's skill and memory namespaces (orphan scan).
+	// Managed dirs include claude's skill and instruction namespaces (orphan scan).
 	if !contains(rw.ManagedDirs, "/home/u/.claude/skills") || !contains(rw.ManagedDirs, "/home/u/.claude/rules") {
 		t.Fatalf("managed dirs = %v, want claude skills + rules", rw.ManagedDirs)
 	}
@@ -132,7 +132,7 @@ func TestBlockersClassifyAllIncompleteModelCauses(t *testing.T) {
 		ScanProblems: []ScanProblem{{Source: "p", Problem: source.Problem{Kind: source.ProblemSkillMissingManifest, Path: "p/skills/x", Detail: "no SKILL.md"}}},
 		Projection: project.Result{Problems: []project.Problem{
 			{Kind: project.ProblemEmptySelection, SourceName: "team", Detail: "matched nothing"},
-			{Kind: project.ProblemUnsupported, SourceName: "team", Agent: core.AgentCodexCLI, Component: "memory/x", Detail: "unsupported"},
+			{Kind: project.ProblemUnsupported, SourceName: "team", Agent: core.AgentCodexCLI, Component: "instruction/x", Detail: "unsupported"},
 		}},
 		Plan: reconcile.Plan{
 			Problems:  []reconcile.Problem{{Kind: reconcile.ProblemAmbiguousTarget, Target: "/t/x", Detail: "ambiguous"}},
@@ -206,7 +206,7 @@ func TestSyncBlocksOnScanProblem(t *testing.T) {
 
 func TestSyncProceedsWhenOnlyUnsupported(t *testing.T) {
 	t.Parallel()
-	// A config that selects everything for claude and codex: codex memory is
+	// A config that selects everything for claude and codex: codex instruction is
 	// unsupported (a projection problem) but that is expected partial coverage and
 	// must NOT block the clean installs.
 	cfg := core.Config{
@@ -222,7 +222,7 @@ func TestSyncProceedsWhenOnlyUnsupported(t *testing.T) {
 			Name: "coding",
 			Components: []core.Component{
 				{Kind: core.KindSkill, Name: "go-style"},
-				{Kind: core.KindMemory, Name: "style"},
+				{Kind: core.KindInstruction, Name: "style"},
 			},
 		}},
 	}
@@ -245,7 +245,7 @@ func TestSyncProceedsWhenOnlyUnsupported(t *testing.T) {
 		}
 	}
 	if !foundUnsupported {
-		t.Fatal("expected the codex memory unsupported problem to be recorded")
+		t.Fatal("expected the codex instruction unsupported problem to be recorded")
 	}
 }
 
@@ -423,14 +423,14 @@ func TestAdoptIgnoresUnrelatedSourceScanProblem(t *testing.T) {
 
 func TestManagedNamespacesKeysByKindNotJustDir(t *testing.T) {
 	t.Parallel()
-	// A custom matrix that maps both skill and memory to the same directory must
-	// yield two distinct namespaces, not one merged by directory.
+	// A custom matrix that maps both skill and instruction to the same directory
+	// must yield two distinct namespaces, not one merged by directory.
 	set, err := agent.NewSet(agent.Spec{
 		ID:   core.AgentOpenCode,
 		Base: agent.Base{HomeRelative: []string{".oc"}},
 		Rules: map[core.Kind]agent.InstallRule{
-			core.KindSkill:  {Tier: agent.Tier1, Segments: []string{"shared"}, Shape: agent.LeafDir},
-			core.KindMemory: {Tier: agent.Tier1, Segments: []string{"shared"}, Shape: agent.LeafFile, Ext: ".md"},
+			core.KindSkill:       {Tier: agent.Tier1, Segments: []string{"shared"}, Shape: agent.LeafDir},
+			core.KindInstruction: {Tier: agent.Tier1, Segments: []string{"shared"}, Shape: agent.LeafFile, Ext: ".md"},
 		},
 	})
 	if err != nil {
@@ -446,14 +446,14 @@ func TestManagedNamespacesKeysByKindNotJustDir(t *testing.T) {
 	ns := managedNamespaces(cfg, set, set.ResolveRoots("/home/u", noEnv))
 
 	if len(ns) != 2 {
-		t.Fatalf("namespaces = %+v, want 2 (skill and memory at the same dir)", ns)
+		t.Fatalf("namespaces = %+v, want 2 (skill and instruction at the same dir)", ns)
 	}
-	// Same directory, distinct kinds, sorted by kind (memory < skill).
+	// Same directory, distinct kinds, sorted by kind (instruction < skill).
 	if ns[0].Dir != "/home/u/.oc/shared" || ns[1].Dir != "/home/u/.oc/shared" {
 		t.Fatalf("dirs = %q, %q, want both /home/u/.oc/shared", ns[0].Dir, ns[1].Dir)
 	}
-	if ns[0].Kind != core.KindMemory || ns[1].Kind != core.KindSkill {
-		t.Fatalf("kinds = %q, %q, want memory then skill", ns[0].Kind, ns[1].Kind)
+	if ns[0].Kind != core.KindInstruction || ns[1].Kind != core.KindSkill {
+		t.Fatalf("kinds = %q, %q, want instruction then skill", ns[0].Kind, ns[1].Kind)
 	}
 }
 

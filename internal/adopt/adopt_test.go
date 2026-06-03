@@ -62,11 +62,11 @@ func TestComputeCoveredNeedsNoSelection(t *testing.T) {
 	}
 }
 
-func TestComputeMemoryDestination(t *testing.T) {
+func TestComputeInstructionDestination(t *testing.T) {
 	t.Parallel()
 	found := []discover.Unmanaged{{
 		Agents: []core.AgentID{core.AgentClaudeCode},
-		Kind:   core.KindMemory, Name: "prefs",
+		Kind:   core.KindInstruction, Name: "prefs",
 		Path: "/home/u/.claude/rules/prefs.md",
 	}}
 	req := Request{Path: "/home/u/.claude/rules/prefs.md", SourceName: "personal", PluginName: "mine"}
@@ -74,8 +74,8 @@ func TestComputeMemoryDestination(t *testing.T) {
 	if prob != nil {
 		t.Fatalf("problem: %+v", prob)
 	}
-	if plan.To != "/src/personal/mine/memories/prefs.md" {
-		t.Fatalf("memory To = %q, want /src/personal/mine/memories/prefs.md", plan.To)
+	if plan.To != "/src/personal/mine/instructions/prefs.md" {
+		t.Fatalf("instruction To = %q, want /src/personal/mine/instructions/prefs.md", plan.To)
 	}
 }
 

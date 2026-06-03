@@ -19,7 +19,7 @@ func TestScanWellFormed(t *testing.T) {
 	fsys := fstest.MapFS{
 		"coding/skills/go-style/SKILL.md":     file("# go style"),
 		"coding/skills/go-style/reference.md": file("resource inside the skill, not a separate component"),
-		"coding/memories/style.md":            file("a memory"),
+		"coding/instructions/style.md":        file("an instruction"),
 		"coding/README.md":                    file("furniture under a plugin, ignored"),
 		"secrets/skills/deploy/SKILL.md":      file("# deploy"),
 		".git/config":                         file("[core]"),
@@ -37,9 +37,9 @@ func TestScanWellFormed(t *testing.T) {
 	if coding.Name != "coding" {
 		t.Fatalf("first plugin = %q, want coding", coding.Name)
 	}
-	// Sorted by kind then name: memory before skill.
+	// Sorted by kind then name: instruction before skill.
 	want := []core.Component{
-		{Kind: core.KindMemory, Name: "style"},
+		{Kind: core.KindInstruction, Name: "style"},
 		{Kind: core.KindSkill, Name: "go-style"},
 	}
 	if len(coding.Components) != 2 || coding.Components[0] != want[0] || coding.Components[1] != want[1] {
@@ -81,22 +81,22 @@ func TestScanStraySkillFileIsProblem(t *testing.T) {
 	}
 }
 
-func TestScanMemoryNotMarkdownIsProblem(t *testing.T) {
+func TestScanInstructionNotMarkdownIsProblem(t *testing.T) {
 	t.Parallel()
 	fsys := fstest.MapFS{
-		"p/memories/note.md":  file("good memory"),
-		"p/memories/note.txt": file("wrong extension"),
-		"p/memories/sub/x.md": file("a directory under memories is wrong too"),
+		"p/instructions/note.md":  file("good instruction"),
+		"p/instructions/note.txt": file("wrong extension"),
+		"p/instructions/sub/x.md": file("a directory under instructions is wrong too"),
 	}
 	res := Scan(fsys)
-	if got := componentNames(res); len(got) != 1 || got[0] != "memory/note" {
-		t.Fatalf("components = %v, want [memory/note]", got)
+	if got := componentNames(res); len(got) != 1 || got[0] != "instruction/note" {
+		t.Fatalf("components = %v, want [instruction/note]", got)
 	}
-	if !hasProblem(res, ProblemMemoryNotMarkdown, "p/memories/note.txt") {
-		t.Fatalf("expected memory-not-markdown for note.txt, got %+v", res.Problems)
+	if !hasProblem(res, ProblemInstructionNotMarkdown, "p/instructions/note.txt") {
+		t.Fatalf("expected instruction-not-markdown for note.txt, got %+v", res.Problems)
 	}
-	if !hasProblem(res, ProblemMemoryNotMarkdown, "p/memories/sub") {
-		t.Fatalf("expected memory-not-markdown for the sub directory, got %+v", res.Problems)
+	if !hasProblem(res, ProblemInstructionNotMarkdown, "p/instructions/sub") {
+		t.Fatalf("expected instruction-not-markdown for the sub directory, got %+v", res.Problems)
 	}
 }
 
@@ -159,19 +159,19 @@ func TestScanSkillManifestNotRegularIsProblem(t *testing.T) {
 	}
 }
 
-func TestScanMemoryNonRegularIsProblem(t *testing.T) {
+func TestScanInstructionNonRegularIsProblem(t *testing.T) {
 	t.Parallel()
-	// A directory named note.md is not a memory (manifesto 48).
+	// A directory named note.md is not an instruction (manifesto 48).
 	fsys := fstest.MapFS{
-		"p/memories/note.md": dir(),
-		"p/memories/ok.md":   file("ok"),
+		"p/instructions/note.md": dir(),
+		"p/instructions/ok.md":   file("ok"),
 	}
 	res := Scan(fsys)
-	if got := componentNames(res); len(got) != 1 || got[0] != "memory/ok" {
-		t.Fatalf("components = %v, want [memory/ok]", got)
+	if got := componentNames(res); len(got) != 1 || got[0] != "instruction/ok" {
+		t.Fatalf("components = %v, want [instruction/ok]", got)
 	}
-	if !hasProblem(res, ProblemMemoryNotMarkdown, "p/memories/note.md") {
-		t.Fatalf("expected memory-not-markdown for a directory note.md, got %+v", res.Problems)
+	if !hasProblem(res, ProblemInstructionNotMarkdown, "p/instructions/note.md") {
+		t.Fatalf("expected instruction-not-markdown for a directory note.md, got %+v", res.Problems)
 	}
 }
 
@@ -180,9 +180,9 @@ func TestScanHiddenComponentEntriesAreProblems(t *testing.T) {
 	// Hidden entries under a kind directory are component candidates, so they are
 	// flagged, not silently dropped (review 1dbd9e0).
 	fsys := fstest.MapFS{
-		"p/skills/.tool/SKILL.md": file("hidden skill"),
-		"p/memories/.secret.md":   file("hidden memory"),
-		"p/skills/real/SKILL.md":  file("a real one"),
+		"p/skills/.tool/SKILL.md":   file("hidden skill"),
+		"p/instructions/.secret.md": file("hidden instruction"),
+		"p/skills/real/SKILL.md":    file("a real one"),
 	}
 	res := Scan(fsys)
 	if got := componentNames(res); len(got) != 1 || got[0] != "skill/real" {
@@ -191,8 +191,8 @@ func TestScanHiddenComponentEntriesAreProblems(t *testing.T) {
 	if !hasProblem(res, ProblemHiddenComponent, "p/skills/.tool") {
 		t.Fatalf("expected hidden-component for p/skills/.tool, got %+v", res.Problems)
 	}
-	if !hasProblem(res, ProblemHiddenComponent, "p/memories/.secret.md") {
-		t.Fatalf("expected hidden-component for p/memories/.secret.md, got %+v", res.Problems)
+	if !hasProblem(res, ProblemHiddenComponent, "p/instructions/.secret.md") {
+		t.Fatalf("expected hidden-component for p/instructions/.secret.md, got %+v", res.Problems)
 	}
 }
 
@@ -201,14 +201,14 @@ func TestLayoutRoundTrip(t *testing.T) {
 	if d, ok := DirForKind(core.KindSkill); !ok || d != "skills" {
 		t.Errorf("DirForKind(skill) = %q,%v, want skills,true", d, ok)
 	}
-	if d, ok := DirForKind(core.KindMemory); !ok || d != "memories" {
-		t.Errorf("DirForKind(memory) = %q,%v, want memories,true", d, ok)
+	if d, ok := DirForKind(core.KindInstruction); !ok || d != "instructions" {
+		t.Errorf("DirForKind(instruction) = %q,%v, want instructions,true", d, ok)
 	}
 	if got := ComponentLeaf(core.Component{Kind: core.KindSkill, Name: "go-style"}); got != "go-style" {
 		t.Errorf("ComponentLeaf(skill) = %q, want go-style", got)
 	}
-	if got := ComponentLeaf(core.Component{Kind: core.KindMemory, Name: "style"}); got != "style.md" {
-		t.Errorf("ComponentLeaf(memory) = %q, want style.md", got)
+	if got := ComponentLeaf(core.Component{Kind: core.KindInstruction, Name: "style"}); got != "style.md" {
+		t.Errorf("ComponentLeaf(instruction) = %q, want style.md", got)
 	}
 }
 

@@ -9,8 +9,8 @@ import (
 	"codeberg.org/botfile/botfile/internal/reconcile"
 )
 
-// codingSource is a scanned "team" source with one plugin holding a skill and a
-// memory, used across the projection tests.
+// codingSource is a scanned "team" source with one plugin holding a skill and an
+// instruction, used across the projection tests.
 func codingSource() Source {
 	return Source{
 		Name: "team",
@@ -19,7 +19,7 @@ func codingSource() Source {
 			Name: "coding",
 			Components: []core.Component{
 				{Kind: core.KindSkill, Name: "go-style"},
-				{Kind: core.KindMemory, Name: "style"},
+				{Kind: core.KindInstruction, Name: "style"},
 			},
 		}},
 	}
@@ -51,7 +51,7 @@ func TestProjectWildcardToClaudeCode(t *testing.T) {
 	}
 	want := []reconcile.LinkSpec{
 		// Sorted by target: rules/ before skills/.
-		{Target: "/home/u/.claude/rules/style.md", Dest: "/src/team/coding/memories/style.md", SourceName: "team"},
+		{Target: "/home/u/.claude/rules/style.md", Dest: "/src/team/coding/instructions/style.md", SourceName: "team"},
 		{Target: "/home/u/.claude/skills/go-style", Dest: "/src/team/coding/skills/go-style", SourceName: "team"},
 	}
 	if !reflect.DeepEqual(res.Links, want) {
@@ -93,10 +93,10 @@ func TestProjectUnsupportedAgentIsProblem(t *testing.T) {
 	}
 }
 
-func TestProjectCodexSkillYesMemoryNo(t *testing.T) {
+func TestProjectCodexSkillYesInstructionNo(t *testing.T) {
 	t.Parallel()
-	// codex-cli supports skills (tier 1) but not memory (manifesto 18): the skill
-	// installs, the memory is an explicit unsupported problem.
+	// codex-cli supports skills (tier 1) but not instructions (manifesto 18): the
+	// skill installs, the instruction is an explicit unsupported problem.
 	cfg := cfgWith(core.Selection{
 		SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
 		Agents: []core.AgentID{core.AgentCodexCLI},
@@ -105,8 +105,8 @@ func TestProjectCodexSkillYesMemoryNo(t *testing.T) {
 	if len(res.Links) != 1 || res.Links[0].Target != "/home/u/.agents/skills/go-style" {
 		t.Fatalf("links = %+v, want only the codex skill under ~/.agents/skills", res.Links)
 	}
-	if len(res.Problems) != 1 || res.Problems[0].Kind != ProblemUnsupported || res.Problems[0].Component != "memory/style" {
-		t.Fatalf("want one unsupported problem for memory/style, got %+v", res.Problems)
+	if len(res.Problems) != 1 || res.Problems[0].Kind != ProblemUnsupported || res.Problems[0].Component != "instruction/style" {
+		t.Fatalf("want one unsupported problem for instruction/style, got %+v", res.Problems)
 	}
 }
 

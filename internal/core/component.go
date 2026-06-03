@@ -9,18 +9,18 @@ import (
 // where the agent treats it in a way manageable by symlinks (manifesto 19);
 // the set grows as agents expose conformant directories (manifesto 24). Today
 // the rigorously specified, broadly supported kinds are skills (manifesto 17)
-// and memory (manifesto 18).
+// and instructions (manifesto 18).
 type Kind string
 
 const (
-	KindSkill  Kind = "skill"
-	KindMemory Kind = "memory"
+	KindSkill       Kind = "skill"
+	KindInstruction Kind = "instruction"
 )
 
 // knownKinds is the canonical set of component kinds botfile models today. It
 // grows by adding a constant here as an agent exposes a conformant directory
 // for a new kind (manifesto 19, 24).
-var knownKinds = []Kind{KindSkill, KindMemory}
+var knownKinds = []Kind{KindSkill, KindInstruction}
 
 // IsKnownKind reports whether k names a component kind botfile models.
 func IsKnownKind(k Kind) bool {

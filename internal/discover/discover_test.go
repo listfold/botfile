@@ -7,7 +7,7 @@ import (
 	"codeberg.org/botfile/botfile/internal/fsport"
 )
 
-func TestFindUnmanagedSkillsAndMemories(t *testing.T) {
+func TestFindUnmanagedSkillsAndInstructions(t *testing.T) {
 	t.Parallel()
 	fsys := fsport.NewMem()
 	skills := "/home/u/.claude/skills"
@@ -28,24 +28,24 @@ func TestFindUnmanagedSkillsAndMemories(t *testing.T) {
 	}
 	// A skill-shaped dir missing its manifest: not adoptable.
 	mustMkdir(t, fsys, skills+"/incomplete")
-	// A real, agent-created memory file.
+	// A real, agent-created instruction file.
 	fsys.AddFile(rules + "/preferences.md")
-	// A botfile-managed memory: a symlink. Not adoptable.
-	if err := fsys.Symlink("/src/team/p/memories/coding.md", rules+"/coding.md"); err != nil {
+	// A botfile-managed instruction: a symlink. Not adoptable.
+	if err := fsys.Symlink("/src/team/p/instructions/coding.md", rules+"/coding.md"); err != nil {
 		t.Fatal(err)
 	}
-	// A non-component file in the memory namespace (no .md): ignored.
+	// A non-component file in the instruction namespace (no .md): ignored.
 	fsys.AddFile(rules + "/notes.txt")
 
 	got, err := Find(fsys, []Namespace{
 		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Dir: skills},
-		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindMemory, Dir: rules},
+		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindInstruction, Dir: rules},
 	})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
 
-	want := []string{"memory/preferences", "skill/bark-pro"} // sorted by path: rules/ before skills/
+	want := []string{"instruction/preferences", "skill/bark-pro"} // sorted by path: rules/ before skills/
 	if len(got) != len(want) {
 		t.Fatalf("found %d, want %d: %+v", len(got), len(want), got)
 	}
@@ -71,12 +71,12 @@ func TestFindRejectsNonRegularFiles(t *testing.T) {
 	// file: not a valid component.
 	mustMkdir(t, fsys, skills+"/fifo-skill")
 	fsys.AddSpecial(skills + "/fifo-skill/SKILL.md")
-	// A memory namespace entry named like a memory but a special file.
+	// An instruction namespace entry named like an instruction but a special file.
 	fsys.AddSpecial(rules + "/special.md")
 
 	got, err := Find(fsys, []Namespace{
 		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Dir: skills},
-		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindMemory, Dir: rules},
+		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindInstruction, Dir: rules},
 	})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
