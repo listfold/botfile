@@ -121,7 +121,7 @@ type Model struct {
 	ConfigPath string
 	Home       string
 	Agents     agent.Set
-	Roots      map[core.AgentID]string
+	Roots      agent.Roots
 	Adopt      adopt.Request // the request, in ModeAdopt; zero otherwise
 
 	// Accumulated state.
@@ -230,7 +230,7 @@ func (CmdApplyAdopt) isCmd()  {}
 
 // Init builds the starting Model and first Cmd. The interpreter passes the
 // values it resolved from the environment so Update stays pure.
-func Init(mode Mode, configPath, home string, agents agent.Set, roots map[core.AgentID]string) (Model, Cmd) {
+func Init(mode Mode, configPath, home string, agents agent.Set, roots agent.Roots) (Model, Cmd) {
 	m := Model{
 		Mode:       mode,
 		Phase:      PhaseLoadingConfig,
@@ -422,7 +422,7 @@ func targetsOf(links []reconcile.LinkSpec) []string {
 // for the agents this config targets, so the world reader can find orphans
 // (manifesto 33). It is every supported (agent, kind) namespace for each agent
 // referenced by a selection.
-func managedDirs(cfg core.Config, agents agent.Set, roots map[core.AgentID]string) []string {
+func managedDirs(cfg core.Config, agents agent.Set, roots agent.Roots) []string {
 	used := make(map[core.AgentID]bool)
 	for _, sel := range cfg.Selections {
 		for _, a := range sel.Agents {
@@ -437,7 +437,11 @@ func managedDirs(cfg core.Config, agents agent.Set, roots map[core.AgentID]strin
 			continue
 		}
 		for _, kind := range ag.SupportedKinds() {
-			if dir, ok := ag.Namespace(roots[id], kind); ok && !seen[dir] {
+			root, ok := roots.For(id, kind)
+			if !ok {
+				continue
+			}
+			if dir, ok := ag.Namespace(root, kind); ok && !seen[dir] {
 				seen[dir] = true
 				dirs = append(dirs, dir)
 			}
@@ -463,7 +467,7 @@ func scanProblemForSource(problems []ScanProblem, source string) *ScanProblem {
 // config-scoped run (status orphan discovery): only the agents some selection
 // already names. A first sync has nothing to manage, so scanning every agent
 // would surface noise the user never opted into.
-func managedNamespaces(cfg core.Config, agents agent.Set, roots map[core.AgentID]string) []discover.Namespace {
+func managedNamespaces(cfg core.Config, agents agent.Set, roots agent.Roots) []discover.Namespace {
 	usedSet := make(map[core.AgentID]bool)
 	for _, sel := range cfg.Selections {
 		for _, a := range sel.Agents {
@@ -481,7 +485,7 @@ func managedNamespaces(cfg core.Config, agents agent.Set, roots map[core.AgentID
 // regardless of the current selections. adopt uses this so a first adopt can
 // bootstrap a config that has sources but no selections yet (the agent that
 // created the component need not already be selected).
-func allNamespaces(agents agent.Set, roots map[core.AgentID]string) []discover.Namespace {
+func allNamespaces(agents agent.Set, roots agent.Roots) []discover.Namespace {
 	return namespacesFor(agents.IDs(), agents, roots)
 }
 
@@ -489,7 +493,7 @@ func allNamespaces(agents agent.Set, roots map[core.AgentID]string) []discover.N
 // (kind, directory). A directory shared by several agents (for example
 // ~/.agents/skills) is scanned once but carries every agent that reads it, so a
 // component found there is attributed to all of them, not just one.
-func namespacesFor(ids []core.AgentID, agents agent.Set, roots map[core.AgentID]string) []discover.Namespace {
+func namespacesFor(ids []core.AgentID, agents agent.Set, roots agent.Roots) []discover.Namespace {
 	used := append([]core.AgentID(nil), ids...) // copy: do not reorder the caller's slice
 	sort.Slice(used, func(i, j int) bool { return used[i] < used[j] })
 
@@ -508,7 +512,11 @@ func namespacesFor(ids []core.AgentID, agents agent.Set, roots map[core.AgentID]
 			continue
 		}
 		for _, kind := range ag.SupportedKinds() {
-			dir, ok := ag.Namespace(roots[id], kind)
+			root, ok := roots.For(id, kind)
+			if !ok {
+				continue
+			}
+			dir, ok := ag.Namespace(root, kind)
 			if !ok {
 				continue
 			}

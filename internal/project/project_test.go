@@ -34,7 +34,7 @@ func cfgWith(sels ...core.Selection) core.Config {
 
 // roots resolves the default matrix's agent roots under a fixed home with no env
 // overrides, matching the pre-resolved roots the runtime would hand projection.
-func roots() map[core.AgentID]string {
+func roots() agent.Roots {
 	return agent.Default().ResolveRoots("/home/u", func(string) string { return "" })
 }
 

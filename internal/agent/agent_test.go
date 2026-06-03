@@ -51,8 +51,52 @@ func TestRootHonorsEnvOverride(t *testing.T) {
 func TestResolveRoots(t *testing.T) {
 	t.Parallel()
 	roots := Default().ResolveRoots("/home/u", noEnv)
-	if roots[core.AgentClaudeCode] != "/home/u/.claude" {
-		t.Errorf("resolved root = %q, want /home/u/.claude", roots[core.AgentClaudeCode])
+	if root, ok := roots.For(core.AgentClaudeCode, core.KindSkill); !ok || root != "/home/u/.claude" {
+		t.Errorf("resolved skill root = %q,%v, want /home/u/.claude", root, ok)
+	}
+	if root, ok := roots.For(core.AgentClaudeCode, core.KindInstruction); !ok || root != "/home/u/.claude" {
+		t.Errorf("resolved instruction root = %q,%v, want /home/u/.claude", root, ok)
+	}
+}
+
+func TestResolveRootsPerKindOverride(t *testing.T) {
+	t.Parallel()
+	// A rule's Base override resolves that kind under a different root than the
+	// agent's default, and honors the override's own env variable.
+	set, err := NewSet(Spec{
+		ID:   core.AgentCodexCLI,
+		Base: Base{HomeRelative: []string{".agents"}},
+		Rules: map[core.Kind]InstallRule{
+			core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
+			core.KindInstruction: {
+				Tier: Tier1, Base: &Base{HomeRelative: []string{".codex"}, EnvOverride: "CODEX_HOME"},
+				Segments: []string{"."}, Shape: LeafFile, Ext: ".md",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSet: %v", err)
+	}
+	roots := set.ResolveRoots("/home/u", noEnv)
+	if root, _ := roots.For(core.AgentCodexCLI, core.KindSkill); root != "/home/u/.agents" {
+		t.Errorf("skill root = %q, want /home/u/.agents (agent default)", root)
+	}
+	if root, _ := roots.For(core.AgentCodexCLI, core.KindInstruction); root != "/home/u/.codex" {
+		t.Errorf("instruction root = %q, want /home/u/.codex (per-kind override)", root)
+	}
+	// The override's own env variable wins when set.
+	withEnv := set.ResolveRoots("/home/u", func(k string) string {
+		if k == "CODEX_HOME" {
+			return "/custom/codex"
+		}
+		return ""
+	})
+	if root, _ := withEnv.For(core.AgentCodexCLI, core.KindInstruction); root != "/custom/codex" {
+		t.Errorf("instruction root with CODEX_HOME = %q, want /custom/codex", root)
+	}
+	// ...and it does not move the skill root, which has no override.
+	if root, _ := withEnv.For(core.AgentCodexCLI, core.KindSkill); root != "/home/u/.agents" {
+		t.Errorf("skill root with CODEX_HOME = %q, want /home/u/.agents (unmoved)", root)
 	}
 }
 
@@ -136,14 +180,16 @@ func TestSharedSkillsPool(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s missing from the default matrix", id)
 		}
-		dir, ok := ag.Namespace(roots[id], core.KindSkill)
+		root, _ := roots.For(id, core.KindSkill)
+		dir, ok := ag.Namespace(root, core.KindSkill)
 		if !ok || dir != "/home/u/.agents/skills" {
 			t.Errorf("%s skill namespace = %q (ok %v), want /home/u/.agents/skills", id, dir, ok)
 		}
 	}
 	// claude-code reads only its own dir, so it is not in the shared pool.
 	cc, _ := Default().Lookup(core.AgentClaudeCode)
-	if dir, _ := cc.Namespace(roots[core.AgentClaudeCode], core.KindSkill); dir != "/home/u/.claude/skills" {
+	ccRoot, _ := roots.For(core.AgentClaudeCode, core.KindSkill)
+	if dir, _ := cc.Namespace(ccRoot, core.KindSkill); dir != "/home/u/.claude/skills" {
 		t.Errorf("claude-code skill namespace = %q, want /home/u/.claude/skills (isolated)", dir)
 	}
 }

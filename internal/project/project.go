@@ -128,7 +128,7 @@ type Result struct {
 // producing desired links plus problems. It is pure: the agents' config roots
 // are resolved by the caller (agent.Set.ResolveRoots) and passed in as roots, so
 // projection never reads the environment.
-func Project(cfg core.Config, sources []Source, agents agent.Set, roots map[core.AgentID]string) Result {
+func Project(cfg core.Config, sources []Source, agents agent.Set, roots agent.Roots) Result {
 	byName := make(map[string]Source, len(sources))
 	for _, s := range sources {
 		byName[s.Name] = s
@@ -170,12 +170,12 @@ func Project(cfg core.Config, sources []Source, agents agent.Set, roots map[core
 					})
 					continue
 				}
-				root, ok := roots[agentID]
+				root, ok := roots.For(agentID, m.comp.Kind)
 				if !ok || root == "" {
 					res.Problems = append(res.Problems, Problem{
 						Kind: ProblemUnsupported, SourceName: src.Name, Agent: agentID,
 						Component: m.comp.Ref().String(),
-						Detail:    "no resolved config root for agent",
+						Detail:    "no resolved config root for this agent and kind",
 					})
 					continue
 				}
@@ -218,14 +218,18 @@ func Project(cfg core.Config, sources []Source, agents agent.Set, roots map[core
 }
 
 // skillNamespaces maps each agent that supports skills to its skill directory.
-func skillNamespaces(agents agent.Set, roots map[core.AgentID]string) map[core.AgentID]string {
+func skillNamespaces(agents agent.Set, roots agent.Roots) map[core.AgentID]string {
 	ns := make(map[core.AgentID]string)
 	for _, id := range agents.IDs() {
 		ag, ok := agents.Lookup(id)
 		if !ok {
 			continue
 		}
-		if dir, ok := ag.Namespace(roots[id], core.KindSkill); ok && roots[id] != "" {
+		root, ok := roots.For(id, core.KindSkill)
+		if !ok || root == "" {
+			continue
+		}
+		if dir, ok := ag.Namespace(root, core.KindSkill); ok {
 			ns[id] = dir
 		}
 	}

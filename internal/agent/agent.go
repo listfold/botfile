@@ -62,8 +62,14 @@ type Base struct {
 // the path projection (the kind's directory relative to the agent's config root,
 // and how the component leaf is named).
 type InstallRule struct {
-	Tier     Tier
-	Segments []string // the kind's directory, relative to the agent config root
+	Tier Tier
+	// Base optionally overrides the agent's default config root for this kind.
+	// Most kinds live under the agent's one Base (nil here), but a kind whose
+	// namespace sits under a different root than the agent's others sets its own
+	// (for example codex's AGENTS.md lives under ~/.codex while its skills live
+	// under the cross-agent ~/.agents). nil means "use the agent's Base".
+	Base     *Base
+	Segments []string // the kind's directory, relative to this kind's config root
 	Shape    LeafShape
 	Ext      string // leaf extension when Shape is LeafFile (for example ".md")
 }
@@ -104,21 +110,42 @@ func (a Agent) SupportedKinds() []core.Kind {
 	return kinds
 }
 
-// Root resolves the agent's config root under home, consulting getenv for the
-// agent's override variable first (manifesto-agnostic vendor behavior, for
-// example claude-code's CLAUDE_CONFIG_DIR). getenv is injected so the env read
-// stays at the boundary; pass os.Getenv from the runtime, or a fake in tests. A
-// nil getenv behaves as if no variable is set.
-func (a Agent) Root(home string, getenv func(string) string) string {
-	if a.base.EnvOverride != "" && getenv != nil {
-		if v := getenv(a.base.EnvOverride); v != "" {
+// resolveBase resolves one Base to an absolute path under home, consulting getenv
+// for the override variable first (for example claude-code's CLAUDE_CONFIG_DIR).
+// getenv is injected so the env read stays at the boundary; a nil getenv behaves
+// as if no variable is set.
+func resolveBase(base Base, home string, getenv func(string) string) string {
+	if base.EnvOverride != "" && getenv != nil {
+		if v := getenv(base.EnvOverride); v != "" {
 			return v
 		}
 	}
-	parts := make([]string, 0, len(a.base.HomeRelative)+1)
+	parts := make([]string, 0, len(base.HomeRelative)+1)
 	parts = append(parts, home)
-	parts = append(parts, a.base.HomeRelative...)
+	parts = append(parts, base.HomeRelative...)
 	return filepath.Join(parts...)
+}
+
+// Root resolves the agent's default config root under home (the Base shared by
+// kinds that do not override it). getenv is injected; pass os.Getenv from the
+// runtime, or a fake in tests.
+func (a Agent) Root(home string, getenv func(string) string) string {
+	return resolveBase(a.base, home, getenv)
+}
+
+// rootForKind resolves the config root for one kind: the rule's Base override if
+// it sets one, otherwise the agent's default Base. The bool is false when the
+// agent does not support the kind.
+func (a Agent) rootForKind(kind core.Kind, home string, getenv func(string) string) (string, bool) {
+	rule, ok := a.rules[kind]
+	if !ok {
+		return "", false
+	}
+	base := a.base
+	if rule.Base != nil {
+		base = *rule.Base
+	}
+	return resolveBase(base, home, getenv), true
 }
 
 // Namespace returns the absolute directory under root where the agent installs
@@ -178,20 +205,47 @@ func (s Set) IDs() []core.AgentID {
 	return ids
 }
 
-// ResolveRoots resolves every agent's config root under home, consulting getenv
-// for overrides. The runtime calls this once (with os.Getenv) and passes the
-// result to the pure projection, so projection never reads the environment.
-func (s Set) ResolveRoots(home string, getenv func(string) string) map[core.AgentID]string {
-	roots := make(map[core.AgentID]string, len(s.agents))
-	for id, a := range s.agents {
-		roots[id] = a.Root(home, getenv)
+// Roots holds each agent's resolved config root for each kind it supports. Most
+// kinds share the agent's default Base, but a rule may override it (a kind whose
+// namespace sits under a different root than the agent's others). The env read
+// happens once, in ResolveRoots, so the pure layer only looks a root up.
+type Roots struct {
+	byKind map[core.AgentID]map[core.Kind]string
+}
+
+// For returns the resolved config root for an (agent, kind) and whether it is
+// set (false when the agent does not support the kind, or is absent).
+func (r Roots) For(id core.AgentID, kind core.Kind) (string, bool) {
+	ks, ok := r.byKind[id]
+	if !ok {
+		return "", false
 	}
-	return roots
+	root, ok := ks[kind]
+	return root, ok
+}
+
+// ResolveRoots resolves every agent's config root, per kind, under home,
+// consulting getenv for overrides. The runtime calls this once (with os.Getenv)
+// and passes the result to the pure projection, so projection never reads the
+// environment.
+func (s Set) ResolveRoots(home string, getenv func(string) string) Roots {
+	byKind := make(map[core.AgentID]map[core.Kind]string, len(s.agents))
+	for id, a := range s.agents {
+		ks := make(map[core.Kind]string, len(a.rules))
+		for kind := range a.rules {
+			if root, ok := a.rootForKind(kind, home, getenv); ok {
+				ks[kind] = root
+			}
+		}
+		byKind[id] = ks
+	}
+	return Roots{byKind: byKind}
 }
 
 // NewAgent validates a Spec into an Agent. It rejects an unknown agent id, an
-// empty config-root base, no rules, and any rule with an unknown kind, empty
-// segments, an invalid tier, or a leaf shape inconsistent with its extension.
+// empty config-root base, no rules, and any rule with an unknown kind, an invalid
+// per-kind base override, empty segments, an invalid tier, or a leaf shape
+// inconsistent with its extension.
 func NewAgent(sp Spec) (Agent, error) {
 	if !core.IsKnownAgent(sp.ID) {
 		return Agent{}, fmt.Errorf("agent %q is not a known agent", sp.ID)
@@ -211,6 +265,16 @@ func NewAgent(sp Spec) (Agent, error) {
 	for kind, rule := range sp.Rules {
 		if !core.IsKnownKind(kind) {
 			return Agent{}, fmt.Errorf("agent %q: unknown kind %q", sp.ID, kind)
+		}
+		if rule.Base != nil {
+			if len(rule.Base.HomeRelative) == 0 {
+				return Agent{}, fmt.Errorf("agent %q kind %q: base override has an empty home-relative path", sp.ID, kind)
+			}
+			for _, seg := range rule.Base.HomeRelative {
+				if seg == "" {
+					return Agent{}, fmt.Errorf("agent %q kind %q: base override has an empty segment", sp.ID, kind)
+				}
+			}
 		}
 		if len(rule.Segments) == 0 {
 			return Agent{}, fmt.Errorf("agent %q kind %q: empty segments", sp.ID, kind)

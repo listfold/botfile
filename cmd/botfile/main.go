@@ -63,7 +63,7 @@ type env struct {
 	configPath string
 	home       string
 	agents     agent.Set
-	roots      map[core.AgentID]string
+	roots      agent.Roots
 }
 
 // resolveEnv reads the config path, home, agent matrix, and resolved roots, or
