@@ -86,6 +86,10 @@ func Compute(req Request, cfg core.Config, sources []project.Source, found []dis
 	leaf := source.ComponentLeaf(core.Component{Kind: comp.Kind, Name: comp.Name})
 	to := filepath.Join(src.Root, req.PluginName, kindDir, leaf)
 
+	// Collision preflight. The effect-layer move (fsport.Rename) is only
+	// best-effort no-clobber (a check, not an atomic primitive), so the
+	// authoritative "is the destination free" decision belongs here in the pure
+	// planner, before any effect runs.
 	if hasComponent(*src, req.PluginName, comp.Kind, comp.Name) {
 		return Plan{}, &Problem{ProblemCollision,
 			fmt.Sprintf("source %q plugin %q already has %s", req.SourceName, req.PluginName, comp.Ref())}

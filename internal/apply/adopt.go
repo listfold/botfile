@@ -30,9 +30,13 @@ func Adopt(fsys fsport.FS, from, to string, addSelection func() (undo func() err
 		undos = append(undos, func() error { return removeEmptyDirs(fsys, created) })
 	}
 
+	// The planner already verified to is free (ProblemCollision). Rename adds a
+	// best-effort (non-atomic) refusal of an observed existing destination, so a
+	// race that slips past the preflight fails fast here instead of overwriting.
 	if err := fsys.Rename(from, to); err != nil {
 		return adoptFail(undos, fmt.Errorf("adopt: move %s: %w", from, err))
 	}
+	// Undo moves the content back; from has been vacated so this is collision-free.
 	undos = append(undos, func() error { return fsys.Rename(to, from) })
 
 	if err := fsys.Symlink(to, from); err != nil {
