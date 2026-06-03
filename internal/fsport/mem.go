@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Mem is an in-memory FS for tests: a flat map of absolute paths to nodes. It
@@ -139,6 +140,42 @@ func (m *Mem) ReadDir(dir string) ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// Rename implements FS, moving the entry and (for a directory) everything under
+// it. It errors if from is absent, to's parent is not a directory, or to already
+// exists.
+func (m *Mem) Rename(from, to string) error {
+	if !filepath.IsAbs(from) {
+		return notAbs(from)
+	}
+	if !filepath.IsAbs(to) {
+		return notAbs(to)
+	}
+	f := filepath.Clean(from)
+	t := filepath.Clean(to)
+	if _, ok := m.nodes[f]; !ok {
+		return &fs.PathError{Op: "rename", Path: f, Err: fs.ErrNotExist}
+	}
+	if !m.isDir(filepath.Dir(t)) {
+		return &fs.PathError{Op: "rename", Path: t, Err: fs.ErrNotExist}
+	}
+	if _, ok := m.nodes[t]; ok {
+		return &fs.PathError{Op: "rename", Path: t, Err: fs.ErrExist}
+	}
+	// Move f and every descendant by rewriting the path prefix.
+	prefix := f + string(filepath.Separator)
+	moved := make(map[string]memNode)
+	for k, n := range m.nodes {
+		if k == f || strings.HasPrefix(k, prefix) {
+			moved[t+k[len(f):]] = n
+			delete(m.nodes, k)
+		}
+	}
+	for k, n := range moved {
+		m.nodes[k] = n
+	}
+	return nil
 }
 
 // isDir reports whether p is a directory: the filesystem root (where Dir(p)==p)

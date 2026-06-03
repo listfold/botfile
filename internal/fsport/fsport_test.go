@@ -145,6 +145,37 @@ func runConformance(t *testing.T, nb newBackend) {
 		}
 	})
 
+	t.Run("rename moves a directory and a symlink", func(t *testing.T) {
+		fsys, base := nb(t)
+		if err := fsys.MkdirAll(filepath.Join(base, "d", "sub")); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := fsys.Rename(filepath.Join(base, "d", "sub"), filepath.Join(base, "d", "moved")); err != nil {
+			t.Fatalf("Rename dir: %v", err)
+		}
+		if e, _ := fsys.Lstat(filepath.Join(base, "d", "sub")); e.Exists {
+			t.Error("source still exists after rename")
+		}
+		if e, _ := fsys.Lstat(filepath.Join(base, "d", "moved")); !e.IsDir {
+			t.Error("renamed directory is not a directory")
+		}
+
+		link := filepath.Join(base, "d", "link")
+		if err := fsys.Symlink(filepath.Join(base, "x"), link); err != nil {
+			t.Fatalf("Symlink: %v", err)
+		}
+		if err := fsys.Rename(link, filepath.Join(base, "d", "link2")); err != nil {
+			t.Fatalf("Rename symlink: %v", err)
+		}
+		if e, _ := fsys.Lstat(filepath.Join(base, "d", "link2")); !e.IsSymlink {
+			t.Error("renamed symlink is not a symlink")
+		}
+
+		if err := fsys.Rename(filepath.Join(base, "absent"), filepath.Join(base, "x2")); err == nil {
+			t.Error("Rename of an absent source: want error, got nil")
+		}
+	})
+
 	t.Run("relative paths are rejected", func(t *testing.T) {
 		fsys, _ := nb(t)
 		rel := "relative/path"
@@ -162,6 +193,9 @@ func runConformance(t *testing.T, nb newBackend) {
 		}
 		if _, err := fsys.ReadDir(rel); !errors.Is(err, ErrNotAbsolute) {
 			t.Errorf("ReadDir rel err = %v, want ErrNotAbsolute", err)
+		}
+		if err := fsys.Rename(rel, "/abs/x"); !errors.Is(err, ErrNotAbsolute) {
+			t.Errorf("Rename rel-from err = %v, want ErrNotAbsolute", err)
 		}
 	})
 }

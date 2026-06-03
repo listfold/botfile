@@ -55,6 +55,9 @@ type FS interface {
 	// sorted. It errors if dir does not exist or is not a directory; a missing
 	// dir is fs.ErrNotExist so callers can skip an unmaterialized namespace.
 	ReadDir(dir string) ([]string, error)
+	// Rename moves the entry (file, directory, or symlink) at from to to. Both
+	// must be absolute. It errors if from does not exist.
+	Rename(from, to string) error
 }
 
 // OS is the real filesystem backend.
@@ -127,6 +130,17 @@ func (OS) ReadDir(dir string) ([]string, error) {
 		names = append(names, de.Name())
 	}
 	return names, nil
+}
+
+// Rename implements FS over os.Rename.
+func (OS) Rename(from, to string) error {
+	if !filepath.IsAbs(from) {
+		return notAbs(from)
+	}
+	if !filepath.IsAbs(to) {
+		return notAbs(to)
+	}
+	return os.Rename(from, to)
 }
 
 func notAbs(path string) error {
