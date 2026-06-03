@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"codeberg.org/botfile/botfile/internal/adopt"
 	"codeberg.org/botfile/botfile/internal/core"
 	"codeberg.org/botfile/botfile/internal/discover"
 	"codeberg.org/botfile/botfile/internal/project"
@@ -119,6 +120,60 @@ func TestRenderStatus(t *testing.T) {
 	}
 	if strings.Contains(out, "managed\n  /h/.claude/skills/missing") {
 		t.Errorf("a drifting link must not be listed as managed\n%s", out)
+	}
+}
+
+func TestParseAdopt(t *testing.T) {
+	t.Parallel()
+	req, err := parseAdopt([]string{"/p/bark", "--into", "personal/mine"})
+	if err != nil || req.Path != "/p/bark" || req.SourceName != "personal" || req.PluginName != "mine" {
+		t.Fatalf("parseAdopt = %+v, %v", req, err)
+	}
+	if r, _ := parseAdopt([]string{"/p/bark", "--into=personal/mine"}); r.SourceName != "personal" || r.PluginName != "mine" {
+		t.Errorf("--into= form = %+v", r)
+	}
+	bad := [][]string{
+		{},                             // no path, no into
+		{"/p"},                         // missing --into
+		{"--into", "personal/mine"},    // missing path
+		{"/p", "--into", "noplugin"},   // not source/plugin
+		{"/p", "--into", "/mine"},      // empty source
+		{"/p", "--into", "personal/"},  // empty plugin
+		{"/p", "--bogus"},              // unknown flag
+		{"/p", "/q", "--into", "s/pl"}, // extra argument
+	}
+	for _, args := range bad {
+		if _, err := parseAdopt(args); err == nil {
+			t.Errorf("parseAdopt(%v): want error, got nil", args)
+		}
+	}
+}
+
+func TestRenderAdopt(t *testing.T) {
+	t.Parallel()
+	// Success.
+	done := runtime.Model{
+		Mode: runtime.ModeAdopt, Phase: runtime.PhaseDone,
+		Adopt:     adopt.Request{SourceName: "personal", PluginName: "mine"},
+		AdoptPlan: adopt.Plan{Kind: core.KindSkill, Name: "bark", From: "/h/.claude/skills/bark", To: "/s/mine/skills/bark", AddSelection: &core.Selection{ComponentID: "skill/bark", Agents: []core.AgentID{core.AgentClaudeCode}}},
+	}
+	var buf bytes.Buffer
+	if code := render(&buf, done); code != 0 {
+		t.Fatalf("adopt done exit = %d, want 0", code)
+	}
+	for _, want := range []string{"move", "link", "select", "adopted skill/bark", "personal", "mine"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("adopt render missing %q\n%s", want, buf.String())
+		}
+	}
+	// Blocked by a problem.
+	blocked := runtime.Model{Mode: runtime.ModeAdopt, Phase: runtime.PhaseBlocked, AdoptProblem: &adopt.Problem{Kind: adopt.ProblemCollision, Detail: "already has skill/bark"}}
+	buf.Reset()
+	if code := render(&buf, blocked); code != 1 {
+		t.Fatalf("adopt blocked exit = %d, want 1", code)
+	}
+	if !strings.Contains(buf.String(), "cannot adopt: already has skill/bark") {
+		t.Errorf("adopt blocked render = %q", buf.String())
 	}
 }
 

@@ -173,6 +173,18 @@ func (d Deps) perform(cmd runtime.Cmd) runtime.Msg {
 		}
 		return runtime.Discovered{Unmanaged: found}
 
+	case runtime.CmdApplyAdopt:
+		var addSelection func() (func() error, error)
+		if c.Plan.AddSelection != nil {
+			sel := *c.Plan.AddSelection
+			path := c.ConfigPath
+			addSelection = func() (func() error, error) { return config.AddSelection(path, sel) }
+		}
+		if err := apply.Adopt(d.FS, c.Plan.From, c.Plan.To, addSelection); err != nil {
+			return runtime.Failed{Stage: "adopt", Err: err}
+		}
+		return runtime.Applied{}
+
 	default:
 		return runtime.Failed{Stage: "interp", Err: fmt.Errorf("unknown command %T", cmd)}
 	}

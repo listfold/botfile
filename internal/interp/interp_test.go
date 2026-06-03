@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"codeberg.org/botfile/botfile/internal/adopt"
 	"codeberg.org/botfile/botfile/internal/agent"
+	"codeberg.org/botfile/botfile/internal/config"
 	"codeberg.org/botfile/botfile/internal/fsport"
 	"codeberg.org/botfile/botfile/internal/runtime"
 )
@@ -125,6 +127,59 @@ func reinitStatus(t *testing.T, home string) (runtime.Model, runtime.Cmd) {
 	agents := agent.Default()
 	roots := agents.ResolveRoots(home, func(string) string { return "" })
 	return runtime.Init(runtime.ModeStatus, configPath, home, agents, roots)
+}
+
+func TestEndToEndAdopt(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src", "personal")
+	home := filepath.Join(tmp, "home")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An agent created a skill directly in claude-code's namespace.
+	writeFile(t, filepath.Join(home, ".claude", "skills", "bark-pro", "SKILL.md"), "woof")
+
+	// A config whose existing selection names claude-code (so its namespaces are
+	// scanned) but does not cover bark-pro, so adopt must add a selection.
+	configPath := filepath.Join(tmp, "config.toml")
+	writeFile(t, configPath, ""+
+		"[[sources]]\nname = \"personal\"\nlocation = \""+src+"\"\n\n"+
+		"[[selections]]\nsource = \"personal\"\ncomponent = \"skill/placeholder\"\nagents = [\"claude-code\"]\n")
+
+	agents := agent.Default()
+	roots := agents.ResolveRoots(home, func(string) string { return "" })
+	model, cmd := runtime.Init(runtime.ModeAdopt, configPath, home, agents, roots)
+	model.Adopt = adopt.Request{
+		Path:       filepath.Join(home, ".claude", "skills", "bark-pro"),
+		SourceName: "personal", PluginName: "mine",
+	}
+	final := OSDeps(home).Run(model, cmd)
+	if final.Phase != runtime.PhaseDone {
+		t.Fatalf("phase = %v (err %v, stage %q, problem %+v)", final.Phase, final.Err, final.FailedStage, final.AdoptProblem)
+	}
+
+	// The skill moved into the source.
+	if e, _ := (fsport.OS{}).Lstat(filepath.Join(src, "mine", "skills", "bark-pro", "SKILL.md")); !e.IsRegular {
+		t.Fatal("skill was not moved into the source")
+	}
+	// The original is now a symlink into the source.
+	if e, _ := (fsport.OS{}).Lstat(filepath.Join(home, ".claude", "skills", "bark-pro")); !e.IsSymlink {
+		t.Fatal("the original was not replaced with a symlink")
+	}
+	// The config gained a selection for the adopted skill.
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, sel := range cfg.Selections {
+		if sel.SourceName == "personal" && sel.PluginName == "mine" && sel.ComponentID == "skill/bark-pro" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("config did not gain a selection for the adopted skill: %+v", cfg.Selections)
+	}
 }
 
 // reinit rebuilds the initial model+cmd reusing the prior run's seeded inputs, so

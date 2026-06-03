@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"codeberg.org/botfile/botfile/internal/adopt"
 	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/core"
 	"codeberg.org/botfile/botfile/internal/discover"
@@ -36,6 +37,7 @@ const (
 	ModePlan Mode = iota
 	ModeSync
 	ModeStatus
+	ModeAdopt
 )
 
 // Phase is where the run is in its lifecycle.
@@ -119,6 +121,7 @@ type Model struct {
 	Home       string
 	Agents     agent.Set
 	Roots      map[core.AgentID]string
+	Adopt      adopt.Request // the request, in ModeAdopt; zero otherwise
 
 	// Accumulated state.
 	Config       core.Config
@@ -128,6 +131,8 @@ type Model struct {
 	Plan         reconcile.Plan
 	Blockers     []Blocker
 	Unmanaged    []discover.Unmanaged
+	AdoptPlan    adopt.Plan     // the computed adopt steps, in ModeAdopt
+	AdoptProblem *adopt.Problem // why a request could not be adopted, if blocked
 	Err          error
 	FailedStage  string
 }
@@ -197,12 +202,20 @@ type CmdApply struct{ Ops []reconcile.Op }
 // CmdDiscover asks the interpreter to scan Namespaces for unmanaged components.
 type CmdDiscover struct{ Namespaces []discover.Namespace }
 
+// CmdApplyAdopt asks the interpreter to execute an adopt plan (move, link, and
+// record the selection in the config at ConfigPath) as a saga.
+type CmdApplyAdopt struct {
+	Plan       adopt.Plan
+	ConfigPath string
+}
+
 func (CmdNone) isCmd()        {}
 func (CmdLoadConfig) isCmd()  {}
 func (CmdScanSources) isCmd() {}
 func (CmdReadWorld) isCmd()   {}
 func (CmdApply) isCmd()       {}
 func (CmdDiscover) isCmd()    {}
+func (CmdApplyAdopt) isCmd()  {}
 
 // Init builds the starting Model and first Cmd. The interpreter passes the
 // values it resolved from the environment so Update stays pure.
@@ -249,6 +262,13 @@ func Update(m Model, msg Msg) (Model, Cmd) {
 		if ss, ok := msg.(SourcesScanned); ok {
 			m.Sources = ss.Sources
 			m.ScanProblems = ss.Problems
+			if m.Mode == ModeAdopt {
+				// adopt needs the scanned sources (roots and collision data) and the
+				// discovered components to validate the request; it skips the
+				// reconcile pipeline.
+				m.Phase = PhaseDiscovering
+				return m, CmdDiscover{Namespaces: managedNamespaces(m.Config, m.Agents, m.Roots)}
+			}
 			// Pure: expand selections over the scanned sources and the matrix.
 			m.Projection = project.Project(m.Config, m.Sources, m.Agents, m.Roots)
 			m.Phase = PhaseReadingWorld
@@ -284,7 +304,20 @@ func Update(m Model, msg Msg) (Model, Cmd) {
 	case PhaseDiscovering:
 		if d, ok := msg.(Discovered); ok {
 			m.Unmanaged = d.Unmanaged
-			m.Phase = PhaseDone
+			if m.Mode == ModeAdopt {
+				// Pure: compute the adopt plan from the request, sources, and the
+				// discovered components, or a problem if it cannot be adopted.
+				plan, prob := adopt.Compute(m.Adopt, m.Config, m.Sources, m.Unmanaged)
+				if prob != nil {
+					m.AdoptProblem = prob
+					m.Phase = PhaseBlocked // a request problem, not an effect failure
+					return m, CmdNone{}
+				}
+				m.AdoptPlan = plan
+				m.Phase = PhaseApplying
+				return m, CmdApplyAdopt{Plan: plan, ConfigPath: m.ConfigPath}
+			}
+			m.Phase = PhaseDone // status: report what was found
 			return m, CmdNone{}
 		}
 

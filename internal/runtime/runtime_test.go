@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"codeberg.org/botfile/botfile/internal/adopt"
 	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/core"
 	"codeberg.org/botfile/botfile/internal/discover"
@@ -334,6 +335,51 @@ func TestManagedNamespacesDedupesSharedDir(t *testing.T) {
 	// Deduped to one namespace, but both readers preserved.
 	if len(shared.Agents) != 2 || shared.Agents[0] != core.AgentCodexCLI || shared.Agents[1] != core.AgentCopilotCLI {
 		t.Fatalf("shared dir agents = %v, want [codex-cli copilot-cli]", shared.Agents)
+	}
+}
+
+func TestAdoptRunComputesAndApplies(t *testing.T) {
+	t.Parallel()
+	m, _ := newModel(t, ModeAdopt)
+	m.Adopt = adopt.Request{Path: "/home/u/.claude/skills/bark", SourceName: "team", PluginName: "mine"}
+	m, _ = Update(m, ConfigLoaded{Config: testConfig()})
+
+	// adopt skips the reconcile pipeline: scan then discover.
+	m, cmd := Update(m, SourcesScanned{Sources: []project.Source{scannedTeam()}})
+	if _, ok := cmd.(CmdDiscover); !ok || m.Phase != PhaseDiscovering {
+		t.Fatalf("adopt after scan = phase %v cmd %T, want Discovering + CmdDiscover", m.Phase, cmd)
+	}
+
+	found := []discover.Unmanaged{{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Name: "bark", Path: "/home/u/.claude/skills/bark"}}
+	m, cmd = Update(m, Discovered{Unmanaged: found})
+	ca, ok := cmd.(CmdApplyAdopt)
+	if !ok || m.Phase != PhaseApplying {
+		t.Fatalf("adopt compute = phase %v cmd %T, want Applying + CmdApplyAdopt", m.Phase, cmd)
+	}
+	if ca.Plan.From != "/home/u/.claude/skills/bark" || ca.Plan.To != "/src/team/mine/skills/bark" {
+		t.Fatalf("adopt plan = %+v", ca.Plan)
+	}
+
+	m, cmd = Update(m, Applied{})
+	if _, ok := cmd.(CmdNone); !ok || m.Phase != PhaseDone {
+		t.Fatalf("adopt end = phase %v cmd %T, want Done", m.Phase, cmd)
+	}
+}
+
+func TestAdoptRunBlocksOnProblem(t *testing.T) {
+	t.Parallel()
+	m, _ := newModel(t, ModeAdopt)
+	m.Adopt = adopt.Request{Path: "/nope", SourceName: "team", PluginName: "mine"}
+	m, _ = Update(m, ConfigLoaded{Config: testConfig()})
+	m, _ = Update(m, SourcesScanned{Sources: []project.Source{scannedTeam()}})
+
+	// Nothing matches the requested path: a not-adoptable problem, blocked, no effect.
+	m, cmd := Update(m, Discovered{Unmanaged: nil})
+	if _, ok := cmd.(CmdNone); !ok || m.Phase != PhaseBlocked {
+		t.Fatalf("adopt of an undiscovered path = phase %v cmd %T, want Blocked + CmdNone", m.Phase, cmd)
+	}
+	if m.AdoptProblem == nil || m.AdoptProblem.Kind != adopt.ProblemNotAdoptable {
+		t.Fatalf("AdoptProblem = %+v, want not-adoptable", m.AdoptProblem)
 	}
 }
 

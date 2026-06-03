@@ -6,12 +6,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"codeberg.org/botfile/botfile/internal/adopt"
 	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/config"
 	"codeberg.org/botfile/botfile/internal/core"
@@ -31,19 +34,19 @@ func main() {
 //	1 blocked (a problem or conflict prevented apply)
 //	2 failed  (an effect or usage error)
 func run(args []string) int {
-	if len(args) != 1 {
+	if len(args) == 0 {
 		usage()
 		return 2
 	}
-
-	var mode runtime.Mode
 	switch args[0] {
 	case "plan":
-		mode = runtime.ModePlan
+		return runMode(args, runtime.ModePlan)
 	case "sync":
-		mode = runtime.ModeSync
+		return runMode(args, runtime.ModeSync)
 	case "status":
-		mode = runtime.ModeStatus
+		return runMode(args, runtime.ModeStatus)
+	case "adopt":
+		return runAdopt(args[1:])
 	case "-h", "--help", "help":
 		usage()
 		return 0
@@ -52,34 +55,126 @@ func run(args []string) int {
 		usage()
 		return 2
 	}
+}
 
+// env is the environment the interpreter and reducer need, resolved once at the
+// boundary.
+type env struct {
+	configPath string
+	home       string
+	agents     agent.Set
+	roots      map[core.AgentID]string
+}
+
+// resolveEnv reads the config path, home, agent matrix, and resolved roots, or
+// reports a usage-style failure.
+func resolveEnv() (env, int) {
 	configPath, err := config.DefaultPath()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "botfile: %v\n", err)
-		return 2
+		return env{}, 2
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "botfile: resolve home: %v\n", err)
+		return env{}, 2
+	}
+	agents := agent.Default()
+	return env{configPath, home, agents, agents.ResolveRoots(home, os.Getenv)}, 0
+}
+
+// runMode runs a no-argument verb (plan, sync, status).
+func runMode(args []string, mode runtime.Mode) int {
+	if len(args) != 1 {
+		fmt.Fprintf(os.Stderr, "botfile %s: takes no arguments\n", args[0])
 		return 2
 	}
-
-	agents := agent.Default()
-	roots := agents.ResolveRoots(home, os.Getenv)
-
-	model, cmd := runtime.Init(mode, configPath, home, agents, roots)
-	model = interp.OSDeps(home).Run(model, cmd)
-
+	e, code := resolveEnv()
+	if code != 0 {
+		return code
+	}
+	model, cmd := runtime.Init(mode, e.configPath, e.home, e.agents, e.roots)
+	model = interp.OSDeps(e.home).Run(model, cmd)
 	return render(os.Stdout, model)
+}
+
+// runAdopt parses `adopt <path> --into <source>/<plugin>` and runs it.
+func runAdopt(args []string) int {
+	req, err := parseAdopt(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "botfile adopt: %v\n\n", err)
+		usage()
+		return 2
+	}
+	e, code := resolveEnv()
+	if code != 0 {
+		return code
+	}
+	req.Path = resolvePath(req.Path, e.home)
+
+	model, cmd := runtime.Init(runtime.ModeAdopt, e.configPath, e.home, e.agents, e.roots)
+	model.Adopt = req
+	model = interp.OSDeps(e.home).Run(model, cmd)
+	return render(os.Stdout, model)
+}
+
+// parseAdopt extracts the path and the --into <source>/<plugin> from the adopt
+// arguments.
+func parseAdopt(args []string) (adopt.Request, error) {
+	var path, into string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--into":
+			i++
+			if i >= len(args) {
+				return adopt.Request{}, errors.New("--into needs a <source>/<plugin> value")
+			}
+			into = args[i]
+		case strings.HasPrefix(a, "--into="):
+			into = strings.TrimPrefix(a, "--into=")
+		case strings.HasPrefix(a, "-"):
+			return adopt.Request{}, fmt.Errorf("unknown flag %q", a)
+		case path == "":
+			path = a
+		default:
+			return adopt.Request{}, fmt.Errorf("unexpected argument %q", a)
+		}
+	}
+	if path == "" {
+		return adopt.Request{}, errors.New("missing <path> to adopt")
+	}
+	source, plugin, ok := strings.Cut(into, "/")
+	if !ok || source == "" || plugin == "" {
+		return adopt.Request{}, fmt.Errorf("--into must be <source>/<plugin>, got %q", into)
+	}
+	return adopt.Request{Path: path, SourceName: source, PluginName: plugin}, nil
+}
+
+// resolvePath expands a leading ~ and makes the path absolute (relative to the
+// working directory, where a path argument is naturally rooted).
+func resolvePath(path, home string) string {
+	switch {
+	case path == "~":
+		path = home
+	case strings.HasPrefix(path, "~/"):
+		path = filepath.Join(home, path[2:])
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 func usage() {
 	fmt.Fprint(os.Stderr, `botfile manages your agents' config and context, like dotfiles.
 
 usage:
-  botfile plan    show what a sync would change, without touching anything
-  botfile sync    reconcile your agents to match your config
-  botfile status  show what is managed, out of sync, and adoptable
+  botfile plan                          show what a sync would change
+  botfile sync                          reconcile your agents to match your config
+  botfile status                        show what is managed, out of sync, and adoptable
+  botfile adopt <path> --into <src>/<plugin>
+                                        bring an agent-created component under management
 `)
 }
 
@@ -94,6 +189,9 @@ func render(w io.Writer, m runtime.Model) int {
 	}
 	if m.Mode == runtime.ModeStatus {
 		return renderStatus(w, m)
+	}
+	if m.Mode == runtime.ModeAdopt {
+		return renderAdopt(w, m)
 	}
 
 	renderOps(w, m)
@@ -223,6 +321,27 @@ func joinAgents(ids []core.AgentID) string {
 		parts[i] = string(id)
 	}
 	return strings.Join(parts, ",")
+}
+
+// renderAdopt reports the outcome of an adopt run: a typed problem (blocked, no
+// effect ran), or the steps applied.
+func renderAdopt(w io.Writer, m runtime.Model) int {
+	if m.Phase == runtime.PhaseBlocked && m.AdoptProblem != nil {
+		fmt.Fprintf(w, "cannot adopt: %s\n", m.AdoptProblem.Detail)
+		return 1
+	}
+	if m.Phase == runtime.PhaseDone {
+		p := m.AdoptPlan
+		fmt.Fprintf(w, "  move   %s -> %s\n", p.From, p.To)
+		fmt.Fprintf(w, "  link   %s -> %s\n", p.From, p.To)
+		if p.AddSelection != nil {
+			fmt.Fprintf(w, "  select %s for %s\n", p.AddSelection.ComponentID, joinAgents(p.AddSelection.Agents))
+		}
+		fmt.Fprintf(w, "\nadopted %s/%s into source %q (plugin %q)\n", p.Kind, p.Name, m.Adopt.SourceName, m.Adopt.PluginName)
+		return 0
+	}
+	fmt.Fprintf(w, "incomplete adopt (phase %d)\n", m.Phase)
+	return 2
 }
 
 // changingTargets is the set of target paths a sync would touch (an op) or that
