@@ -51,7 +51,7 @@ func (m *Mem) Lstat(path string) (Entry, error) {
 	if n.kind == memSymlink {
 		return Entry{Exists: true, IsSymlink: true, Dest: n.dest}, nil
 	}
-	return Entry{Exists: true}, nil
+	return Entry{Exists: true, IsDir: n.kind == memDir}, nil
 }
 
 // Symlink implements FS.

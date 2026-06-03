@@ -28,6 +28,7 @@ var ErrNotAbsolute = errors.New("path must be absolute")
 type Entry struct {
 	Exists    bool
 	IsSymlink bool
+	IsDir     bool   // a directory (and not a symlink); meaningful when Exists
 	Dest      string // the symlink's destination when IsSymlink
 }
 
@@ -75,7 +76,7 @@ func (OS) Lstat(path string) (Entry, error) {
 		}
 		return Entry{Exists: true, IsSymlink: true, Dest: dest}, nil
 	}
-	return Entry{Exists: true}, nil
+	return Entry{Exists: true, IsDir: fi.IsDir()}, nil
 }
 
 // Symlink implements FS over os.Symlink. Both the link and its destination must

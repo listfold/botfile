@@ -63,9 +63,9 @@ func ComponentLeaf(c core.Component) string {
 	return c.Name
 }
 
-// memoryName returns the component name for a memory file entry (the filename
+// MemoryName returns the component name for a memory file entry (the filename
 // without the .md extension) and whether the entry is a .md file at all.
-func memoryName(entry string) (string, bool) {
+func MemoryName(entry string) (string, bool) {
 	if !strings.HasSuffix(entry, memoryExt) {
 		return "", false
 	}

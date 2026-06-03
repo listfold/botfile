@@ -212,7 +212,7 @@ func scanMemory(base string, e fs.DirEntry, plugin *core.Plugin, res *Result) {
 	// A memory must be a regular .md file: not a directory, symlink, or other
 	// special entry (manifesto 48). DirEntry.Type does not follow symlinks, so a
 	// symlink entry is correctly rejected as non-regular.
-	name, ok := memoryName(e.Name())
+	name, ok := MemoryName(e.Name())
 	if !e.Type().IsRegular() || !ok {
 		res.Problems = append(res.Problems, Problem{
 			Kind: ProblemMemoryNotMarkdown, Path: entryPath,
