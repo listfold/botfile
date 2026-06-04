@@ -384,6 +384,101 @@ func TestAdoptRunBlocksOnProblem(t *testing.T) {
 	}
 }
 
+func TestAdoptSingletonLeavesNoBrokenSync(t *testing.T) {
+	t.Parallel()
+	// The invariant adopt's singleton-cardinality preflight protects: a successful
+	// singleton adopt must not leave a "succeeded now, ambiguous on next sync"
+	// state. Run the adopt to Done, then feed its own output (the moved
+	// instruction and any added selection) into a real sync, and assert reconcile
+	// finds no ProblemAmbiguousTarget. Chaining from adopt's actual plan keeps the
+	// test honest: it cannot drift from what adopt really writes.
+	cfg := core.Config{
+		Sources: []core.Source{{Name: "team", Location: "/src/team"}},
+		Selections: []core.Selection{{
+			SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
+			Agents: []core.AgentID{core.AgentCodexCLI},
+		}},
+	}
+	src := project.Source{Name: "team", Root: "/src/team", Plugins: []core.Plugin{{Name: "mine"}}}
+	found := []discover.Unmanaged{{Agents: []core.AgentID{core.AgentCodexCLI}, Kind: core.KindInstruction, Name: "codex-cli", Path: "/home/u/.codex/AGENTS.md"}}
+
+	// Phase 1: adopt the singleton to Done, capturing its plan.
+	a, _ := newModel(t, ModeAdopt)
+	a.Adopt = adopt.Request{Path: "/home/u/.codex/AGENTS.md", SourceName: "team", PluginName: "mine"}
+	a, _ = Update(a, ConfigLoaded{Config: cfg})
+	a, _ = Update(a, SourcesScanned{Sources: []project.Source{src}})
+	a, cmd := Update(a, Discovered{Unmanaged: found})
+	ca, ok := cmd.(CmdApplyAdopt)
+	if !ok {
+		t.Fatalf("singleton adopt = phase %v cmd %T, want Applying + CmdApplyAdopt", a.Phase, cmd)
+	}
+	a, _ = Update(a, Applied{})
+	if a.Phase != PhaseDone {
+		t.Fatalf("singleton adopt end phase = %v, want Done", a.Phase)
+	}
+
+	// Phase 2: the post-adopt world. The instruction now lives in the source, and
+	// any selection adopt added is in the config.
+	if ca.Plan.AddSelection != nil {
+		cfg.Selections = append(cfg.Selections, *ca.Plan.AddSelection)
+	}
+	moved := project.Source{Name: "team", Root: "/src/team", Plugins: []core.Plugin{{
+		Name:       "mine",
+		Components: []core.Component{{Kind: ca.Plan.Kind, Name: ca.Plan.Name}},
+	}}}
+
+	// Phase 3: a sync over that world must reconcile cleanly.
+	s, _ := newModel(t, ModePlan)
+	s, _ = Update(s, ConfigLoaded{Config: cfg})
+	s, _ = Update(s, SourcesScanned{Sources: []project.Source{moved}})
+	s, _ = Update(s, WorldRead{World: reconcile.World{Entries: map[string]reconcile.Entry{}}})
+	for _, p := range s.Plan.Problems {
+		if p.Kind == reconcile.ProblemAmbiguousTarget {
+			t.Fatalf("post-adopt sync is ambiguous: %+v", p)
+		}
+	}
+	if len(s.Plan.Ops) != 1 || s.Plan.Ops[0].Target != "/home/u/.codex/AGENTS.md" {
+		t.Fatalf("post-adopt plan ops = %+v, want one op for ~/.codex/AGENTS.md", s.Plan.Ops)
+	}
+}
+
+func TestAdoptBlocksAmbiguousSingleton(t *testing.T) {
+	t.Parallel()
+	// The other side of the invariant: when a broad wildcard already selects
+	// codex-cli and the target source already holds one instruction, adopting a
+	// second instruction for that singleton would route two destinations to
+	// ~/.codex/AGENTS.md from one source. adopt must block before any effect (the
+	// broad-selection path the per-source e2e did not exercise), not succeed and
+	// strand a later sync on ProblemAmbiguousTarget.
+	m, _ := newModel(t, ModeAdopt)
+	m.Adopt = adopt.Request{Path: "/home/u/.codex/AGENTS.md", SourceName: "team", PluginName: "coding"}
+	cfg := core.Config{
+		Sources: []core.Source{{Name: "team", Location: "/src/team"}},
+		Selections: []core.Selection{{
+			SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
+			Agents: []core.AgentID{core.AgentCodexCLI},
+		}},
+	}
+	src := project.Source{
+		Name: "team", Root: "/src/team",
+		Plugins: []core.Plugin{{
+			Name:       "coding",
+			Components: []core.Component{{Kind: core.KindInstruction, Name: "house-rules"}},
+		}},
+	}
+	m, _ = Update(m, ConfigLoaded{Config: cfg})
+	m, _ = Update(m, SourcesScanned{Sources: []project.Source{src}})
+
+	found := []discover.Unmanaged{{Agents: []core.AgentID{core.AgentCodexCLI}, Kind: core.KindInstruction, Name: "codex-cli", Path: "/home/u/.codex/AGENTS.md"}}
+	m, cmd := Update(m, Discovered{Unmanaged: found})
+	if _, ok := cmd.(CmdNone); !ok || m.Phase != PhaseBlocked {
+		t.Fatalf("ambiguous-singleton adopt = phase %v cmd %T, want Blocked + CmdNone", m.Phase, cmd)
+	}
+	if m.AdoptProblem == nil || m.AdoptProblem.Kind != adopt.ProblemAmbiguousSingleton {
+		t.Fatalf("AdoptProblem = %+v, want ambiguous-singleton", m.AdoptProblem)
+	}
+}
+
 func TestAdoptBlocksOnTargetSourceScanProblem(t *testing.T) {
 	t.Parallel()
 	// The target source did not scan cleanly, so the collision preflight cannot be
