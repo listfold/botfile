@@ -87,7 +87,7 @@ func TestFindUnmanagedSkillsAndInstructions(t *testing.T) {
 
 	got, err := Find(fsys, []Namespace{
 		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Dir: skills},
-		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindInstruction, Dir: rules},
+		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindInstruction, Dir: rules, Ext: ".md"},
 	})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
@@ -104,6 +104,33 @@ func TestFindUnmanagedSkillsAndInstructions(t *testing.T) {
 		if len(u.Agents) != 1 || u.Agents[0] != core.AgentClaudeCode {
 			t.Errorf("found[%d] agents = %v, want [claude-code]", i, u.Agents)
 		}
+	}
+}
+
+func TestFindDropInInstructionCompoundExtension(t *testing.T) {
+	t.Parallel()
+	// A drop-in instruction namespace whose leaves use a compound extension
+	// (copilot-vscode's ~/.copilot/instructions/<name>.instructions.md). The name
+	// is recovered by stripping the namespace's Ext, not a hardcoded ".md".
+	fsys := fsport.NewMem()
+	dir := "/home/u/.copilot/instructions"
+	if err := fsys.MkdirAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	fsys.AddFile(dir + "/style.instructions.md") // real, adoptable
+	if err := fsys.Symlink("/src/p/instructions/coding.md", dir+"/coding.instructions.md"); err != nil {
+		t.Fatal(err) // botfile-managed: a symlink, not adoptable
+	}
+	fsys.AddFile(dir + "/notes.md") // not the compound extension: ignored
+
+	got, err := Find(fsys, []Namespace{
+		{Agents: []core.AgentID{core.AgentCopilotVSCode}, Kind: core.KindInstruction, Dir: dir, Ext: ".instructions.md"},
+	})
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if len(got) != 1 || got[0].Ref() != "instruction/style" {
+		t.Fatalf("found %+v, want one instruction/style (name without .instructions.md)", got)
 	}
 }
 
@@ -124,7 +151,7 @@ func TestFindRejectsNonRegularFiles(t *testing.T) {
 
 	got, err := Find(fsys, []Namespace{
 		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Dir: skills},
-		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindInstruction, Dir: rules},
+		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindInstruction, Dir: rules, Ext: ".md"},
 	})
 	if err != nil {
 		t.Fatalf("Find: %v", err)

@@ -232,6 +232,18 @@ func (a Agent) FixedFile(kind core.Kind) (string, bool) {
 	return rule.Filename, true
 }
 
+// LeafExt reports the install leaf extension for a drop-in (LeafFile) kind (for
+// example claude-code instructions ".md", copilot-vscode instructions
+// ".instructions.md"), so discovery can recover a component's name from its leaf
+// without assuming ".md". It returns false for non-LeafFile shapes.
+func (a Agent) LeafExt(kind core.Kind) (string, bool) {
+	rule, ok := a.rules[kind]
+	if !ok || rule.Shape != LeafFile {
+		return "", false
+	}
+	return rule.Ext, true
+}
+
 // Set is a collection of agents keyed by ID: the matrix the projection consumes.
 type Set struct {
 	agents map[core.AgentID]Agent

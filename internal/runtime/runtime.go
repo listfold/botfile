@@ -527,8 +527,9 @@ func namespacesFor(ids []core.AgentID, agents agent.Set, roots agent.Roots) []di
 		kind core.Kind
 		dir  string
 		file string
+		ext  string
 	}
-	byKey := make(map[key]int) // (kind, dir, file) -> index into ns
+	byKey := make(map[key]int) // (kind, dir, file, ext) -> index into ns
 	var ns []discover.Namespace
 	for _, id := range used {
 		ag, ok := agents.Lookup(id)
@@ -545,13 +546,14 @@ func namespacesFor(ids []core.AgentID, agents agent.Set, roots agent.Roots) []di
 				continue
 			}
 			file, _ := ag.FixedFile(kind) // "" for a directory surface
-			k := key{kind, dir, file}
+			ext, _ := ag.LeafExt(kind)    // the drop-in leaf extension, "" otherwise
+			k := key{kind, dir, file, ext}
 			if i, exists := byKey[k]; exists {
 				ns[i].Agents = append(ns[i].Agents, id)
 				continue
 			}
 			byKey[k] = len(ns)
-			ns = append(ns, discover.Namespace{Agents: []core.AgentID{id}, Kind: kind, Dir: dir, File: file})
+			ns = append(ns, discover.Namespace{Agents: []core.AgentID{id}, Kind: kind, Dir: dir, File: file, Ext: ext})
 		}
 	}
 	sort.Slice(ns, func(i, j int) bool {
@@ -561,9 +563,12 @@ func namespacesFor(ids []core.AgentID, agents agent.Set, roots agent.Roots) []di
 		if ns[i].Kind != ns[j].Kind {
 			return ns[i].Kind < ns[j].Kind
 		}
-		// File is part of the dedupe key, so it must also order: two fixed-file
+		// File and Ext are part of the dedupe key, so they must also order: two
 		// surfaces of the same kind in one dir (a custom matrix) stay deterministic.
-		return ns[i].File < ns[j].File
+		if ns[i].File != ns[j].File {
+			return ns[i].File < ns[j].File
+		}
+		return ns[i].Ext < ns[j].Ext
 	})
 	return ns
 }

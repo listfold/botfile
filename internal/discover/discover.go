@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"codeberg.org/botfile/botfile/internal/core"
 	"codeberg.org/botfile/botfile/internal/fsport"
@@ -36,6 +37,7 @@ type Namespace struct {
 	Kind   core.Kind
 	Dir    string // absolute path, for example ~/.claude/skills or ~/.codex
 	File   string // when set, the only entry to consider under Dir (for example AGENTS.md)
+	Ext    string // the install leaf extension for a drop-in instruction dir (".md", ".instructions.md")
 }
 
 // Unmanaged is an adoptable component found in an agent namespace, attributed to
@@ -120,8 +122,15 @@ func classify(fsys fsport.FS, ns Namespace, name, path string, entry fsport.Entr
 			}
 			return Unmanaged{Agents: ns.Agents, Kind: core.KindInstruction, Name: string(ns.Agents[0]), Path: path}, true
 		}
-		iname, ok := source.InstructionName(name)
-		if !ok || core.ValidateName("instruction name", iname) != nil {
+		// A drop-in instruction's name is its leaf with the agent's install
+		// extension removed (claude-code ".md", copilot-vscode ".instructions.md").
+		// The extension comes from the namespace, not a hardcoded ".md", so a
+		// compound leaf like foo.instructions.md adopts as instruction/foo.
+		if ns.Ext == "" || !strings.HasSuffix(name, ns.Ext) {
+			return Unmanaged{}, false
+		}
+		iname := strings.TrimSuffix(name, ns.Ext)
+		if core.ValidateName("instruction name", iname) != nil {
 			return Unmanaged{}, false
 		}
 		return Unmanaged{Agents: ns.Agents, Kind: core.KindInstruction, Name: iname, Path: path}, true
