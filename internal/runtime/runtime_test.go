@@ -387,11 +387,13 @@ func TestAdoptRunBlocksOnProblem(t *testing.T) {
 func TestAdoptSingletonLeavesNoBrokenSync(t *testing.T) {
 	t.Parallel()
 	// The invariant adopt's singleton-cardinality preflight protects: a successful
-	// singleton adopt must not leave a "succeeded now, ambiguous on next sync"
-	// state. Run the adopt to Done, then feed its own output (the moved
-	// instruction and any added selection) into a real sync, and assert reconcile
-	// finds no ProblemAmbiguousTarget. Chaining from adopt's actual plan keeps the
-	// test honest: it cannot drift from what adopt really writes.
+	// singleton adopt must not leave a source/config model that a later sync can
+	// only reject. Run the adopt to Done, then plan a fresh-machine sync (ModePlan
+	// over an empty world) from its resulting source and config, and assert the
+	// plan is clean: no blockers, no reconcile problems, one link to the singleton
+	// file. Chaining from adopt's actual plan keeps the test honest: it cannot
+	// drift from what adopt really writes. (This is the fresh-install projection,
+	// not the same-machine post-adopt no-op world.)
 	cfg := core.Config{
 		Sources: []core.Source{{Name: "team", Location: "/src/team"}},
 		Selections: []core.Selection{{
@@ -417,8 +419,8 @@ func TestAdoptSingletonLeavesNoBrokenSync(t *testing.T) {
 		t.Fatalf("singleton adopt end phase = %v, want Done", a.Phase)
 	}
 
-	// Phase 2: the post-adopt world. The instruction now lives in the source, and
-	// any selection adopt added is in the config.
+	// Phase 2: the model adopt left behind. The instruction now lives in the
+	// source, and any selection adopt added is in the config.
 	if ca.Plan.AddSelection != nil {
 		cfg.Selections = append(cfg.Selections, *ca.Plan.AddSelection)
 	}
@@ -427,15 +429,16 @@ func TestAdoptSingletonLeavesNoBrokenSync(t *testing.T) {
 		Components: []core.Component{{Kind: ca.Plan.Kind, Name: ca.Plan.Name}},
 	}}}
 
-	// Phase 3: a sync over that world must reconcile cleanly.
+	// Phase 3: planning a fresh-machine sync from that model must be clean.
 	s, _ := newModel(t, ModePlan)
 	s, _ = Update(s, ConfigLoaded{Config: cfg})
 	s, _ = Update(s, SourcesScanned{Sources: []project.Source{moved}})
 	s, _ = Update(s, WorldRead{World: reconcile.World{Entries: map[string]reconcile.Entry{}}})
-	for _, p := range s.Plan.Problems {
-		if p.Kind == reconcile.ProblemAmbiguousTarget {
-			t.Fatalf("post-adopt sync is ambiguous: %+v", p)
-		}
+	if s.Phase != PhaseDone || len(s.Blockers) != 0 {
+		t.Fatalf("post-adopt plan = phase %v blockers %+v", s.Phase, s.Blockers)
+	}
+	if len(s.Plan.Problems) != 0 {
+		t.Fatalf("post-adopt plan problems = %+v", s.Plan.Problems)
 	}
 	if len(s.Plan.Ops) != 1 || s.Plan.Ops[0].Target != "/home/u/.codex/AGENTS.md" {
 		t.Fatalf("post-adopt plan ops = %+v, want one op for ~/.codex/AGENTS.md", s.Plan.Ops)
