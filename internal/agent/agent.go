@@ -389,22 +389,24 @@ func NewSet(specs ...Spec) (Set, error) {
 //
 // Skills (tier 1 auto-discovery: one directory per skill, each with a SKILL.md,
 // found by presence, manifesto 17, 22, 48) are specified for claude-code,
-// codex-cli, copilot-cli, opencode, and pi.dev. Four of those (codex-cli,
-// copilot-cli, opencode, pi.dev) read the cross-agent ~/.agents/skills drop-in,
-// so botfile targets that shared directory for all of them: one symlink serves
-// every reader, at the cost of coarse selection across the pool (manifesto 49;
-// callouts/per-agent-skill-selection-needs-isolated-namespaces.md). claude-code does not read the
+// codex-cli, copilot-cli, crush, opencode, and pi.dev. Five of those (codex-cli,
+// copilot-cli, crush, opencode, pi.dev) read the cross-agent ~/.agents/skills
+// drop-in, so botfile targets that shared directory for all of them: one symlink
+// serves every reader, at the cost of coarse selection across the pool (manifesto
+// 49; callouts/per-agent-skill-selection-needs-isolated-namespaces.md). claude-code does not read the
 // shared dir (only ~/.claude/skills), so it stays isolated and keeps per-agent
 // selection. opencode also reads ~/.config/opencode/skills and ~/.claude/skills,
-// and pi.dev also reads ~/.pi/agent/skills; we install to the shared dir on
-// purpose, to stay on the cross-agent convention.
+// pi.dev also reads ~/.pi/agent/skills, and crush also reads ~/.claude/skills,
+// ~/.config/crush/skills, and ~/.config/agents/skills; we install to the shared
+// dir on purpose, to stay on the cross-agent convention.
 //
 // Instructions (manifesto 18) are specified for every agent, in one of two
 // shapes. claude-code exposes a drop-in directory of one file per instruction
 // (~/.claude/rules/, LeafFile, tier 1), so botfile fans out one symlink per
 // instruction. The others read a single fixed file (codex-cli ~/.codex/AGENTS.md,
 // opencode ~/.config/opencode/AGENTS.md, pi.dev ~/.pi/agent/AGENTS.md, copilot-cli
-// ~/.copilot/copilot-instructions.md): a LeafFixed singleton on its own root
+// ~/.copilot/copilot-instructions.md, crush ~/.config/crush/CRUSH.md): a LeafFixed
+// singleton on its own root
 // (slice 2's per-kind base). botfile installs into it like any other target and
 // never clobbers; where a user-authored file already sits there the reconcile
 // conflict rules (manifesto 35) report it and refuse to sync, and the user
