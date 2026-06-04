@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -13,6 +14,39 @@ import (
 	"codeberg.org/botfile/botfile/internal/reconcile"
 	"codeberg.org/botfile/botfile/internal/runtime"
 )
+
+// TestEmitFormatParity checks that the text and JSON renderers agree on the exit
+// code for every outcome, and that the JSON form is always valid and carries the
+// same code in its body.
+func TestEmitFormatParity(t *testing.T) {
+	t.Parallel()
+	models := []runtime.Model{
+		{Mode: runtime.ModePlan, Phase: runtime.PhaseDone, Plan: reconcile.Plan{Ops: []reconcile.Op{{Kind: reconcile.OpCreate, Target: "/t", Dest: "/d"}}}},
+		{Mode: runtime.ModePlan, Phase: runtime.PhaseDone, Blockers: []runtime.Blocker{{Kind: runtime.BlockerConflict, Cause: "conflict", Ref: "/t", Detail: "x"}}},
+		{Mode: runtime.ModeSync, Phase: runtime.PhaseBlocked, Blockers: []runtime.Blocker{{Kind: runtime.BlockerConflict, Cause: "conflict", Ref: "/t", Detail: "x"}}},
+		{Mode: runtime.ModeStatus, Phase: runtime.PhaseDone},
+		{Mode: runtime.ModeAdopt, Phase: runtime.PhaseBlocked, AdoptProblem: &adopt.Problem{Detail: "collision"}},
+		{Mode: runtime.ModeSync, Phase: runtime.PhaseFailed, FailedStage: "apply", Err: errors.New("boom")},
+	}
+	for _, m := range models {
+		var tb, jb bytes.Buffer
+		tc := emit(&tb, m, "text")
+		jc := emit(&jb, m, "json")
+		if tc != jc {
+			t.Errorf("%v/%v: text exit %d != json exit %d", m.Mode, m.Phase, tc, jc)
+		}
+		var doc struct {
+			ExitCode int `json:"exitCode"`
+		}
+		if err := json.Unmarshal(jb.Bytes(), &doc); err != nil {
+			t.Errorf("%v/%v: invalid json: %v\n%s", m.Mode, m.Phase, err, jb.String())
+			continue
+		}
+		if doc.ExitCode != jc {
+			t.Errorf("%v/%v: json body exitCode %d != returned %d", m.Mode, m.Phase, doc.ExitCode, jc)
+		}
+	}
+}
 
 func TestRenderSyncDoneShowsOpsAndInfo(t *testing.T) {
 	m := runtime.Model{

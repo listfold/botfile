@@ -52,8 +52,11 @@ var commands = []Command{
 		Flags: []Flag{{Name: "into", Value: "<source>/<plugin>", Required: true}}},
 }
 
-// globalFlags apply to every command. (Empty until --format arrives.)
-var globalFlags []Flag
+// globalFlags apply to every command. --format selects the output renderer; it
+// is validated and shown in usage by the same machinery as command flags.
+var globalFlags = []Flag{
+	{Name: "format", Enum: []string{"text", "json"}, Default: "text"},
+}
 
 // Invocation is a parsed, validated command line: the matched command plus its
 // positional and flag values, ready for a handler to consume.

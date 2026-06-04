@@ -2,6 +2,7 @@ package output
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -107,6 +108,35 @@ func TestReportAdoptSelect(t *testing.T) {
 	}
 	if r.Adopt.Move.From != "/f" || r.Adopt.Kind != "skill" || r.Adopt.Source != "personal" {
 		t.Fatalf("adopt = %+v", r.Adopt)
+	}
+}
+
+func TestRenderJSONShape(t *testing.T) {
+	t.Parallel()
+	m := runtime.Model{
+		Mode: runtime.ModePlan, Phase: runtime.PhaseDone,
+		Plan: reconcile.Plan{Ops: []reconcile.Op{{Kind: reconcile.OpCreate, Target: "/t", Dest: "/d"}}},
+	}
+	var buf bytes.Buffer
+	if err := RenderJSON(&buf, ReportFromModel(m)); err != nil {
+		t.Fatalf("RenderJSON: %v", err)
+	}
+	var got Report
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, buf.String())
+	}
+	if got.Command != "plan" || got.Outcome != "ok" || got.ExitCode != 0 {
+		t.Errorf("top-level = %+v", got)
+	}
+	if len(got.Ops) != 1 || got.Ops[0].Kind != "create" || got.Summary.Ops != 1 {
+		t.Errorf("ops/summary = %+v / %+v", got.Ops, got.Summary)
+	}
+	// Empty categories are omitted, so a clean run is small. (Check categories
+	// whose keys do not also appear under summary.)
+	for _, k := range []string{`"status"`, `"adopt"`, `"failure"`, `"notes"`} {
+		if strings.Contains(buf.String(), k) {
+			t.Errorf("empty category %s not omitted:\n%s", k, buf.String())
+		}
 	}
 }
 

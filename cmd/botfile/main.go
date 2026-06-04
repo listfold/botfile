@@ -61,7 +61,7 @@ func run(args []string) int {
 		model.Adopt = req
 	}
 	model = interp.OSDeps(e.home).Run(model, cmd)
-	return render(os.Stdout, model)
+	return emit(os.Stdout, model, inv.Flags["format"])
 }
 
 // usageErr reports a usage-level failure (bad verb, flag, or argument) followed
@@ -113,11 +113,24 @@ func resolvePath(path, home string) string {
 	return path
 }
 
-// render classifies the run into a presentation Report and writes its text form,
-// returning the report's exit code. All outcome logic lives in internal/output,
-// the single source shared by the text and JSON renderers.
-func render(w io.Writer, m runtime.Model) int {
+// emit classifies the run into a presentation Report and writes it in the chosen
+// format ("text" or "json"), returning the report's exit code. All outcome logic
+// lives in internal/output, the single source shared by both renderers, so the
+// exit code is identical regardless of format.
+func emit(w io.Writer, m runtime.Model, format string) int {
 	r := output.ReportFromModel(m)
+	if format == "json" {
+		if err := output.RenderJSON(w, r); err != nil {
+			fmt.Fprintf(os.Stderr, "botfile: encode json: %v\n", err)
+			return 2
+		}
+		return r.ExitCode
+	}
 	output.RenderText(w, r)
 	return r.ExitCode
+}
+
+// render writes the text form. It is the text entrypoint the render tests use.
+func render(w io.Writer, m runtime.Model) int {
+	return emit(w, m, "text")
 }
