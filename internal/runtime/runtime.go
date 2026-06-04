@@ -398,7 +398,7 @@ func blockers(m Model) []Blocker {
 		bs = append(bs, Blocker{Kind: BlockerPlanProblem, Cause: p.Kind.String(), Ref: p.Target, Detail: p.Detail})
 	}
 	for _, c := range m.Plan.Conflicts {
-		bs = append(bs, Blocker{Kind: BlockerConflict, Cause: BlockerConflict.String(), Ref: c.Target, Detail: c.Reason})
+		bs = append(bs, Blocker{Kind: BlockerConflict, Cause: c.Kind.String(), Ref: c.Target, Detail: c.Reason})
 	}
 	return bs
 }

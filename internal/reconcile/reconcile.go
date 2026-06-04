@@ -171,10 +171,36 @@ type Op struct {
 // the filesystem is in the way, and the user can resolve it (move the file).
 // botfile reports it and never clobbers.
 type Conflict struct {
+	Kind       ConflictKind
 	Target     string
 	Dest       string // the desired destination that could not be installed
 	SourceName string // the source whose link is blocked
 	Reason     string
+}
+
+// ConflictKind classifies what occupies a target path botfile may not clobber, a
+// stable token a machine consumer can branch on without parsing Reason prose.
+type ConflictKind int
+
+const (
+	// ConflictForeignSymlink: a symlink botfile did not create already sits at the
+	// target.
+	ConflictForeignSymlink ConflictKind = iota
+	// ConflictOccupiedPath: a non-symlink file or directory already sits at the
+	// target.
+	ConflictOccupiedPath
+)
+
+// String renders a ConflictKind as a stable, human-readable token.
+func (k ConflictKind) String() string {
+	switch k {
+	case ConflictForeignSymlink:
+		return "foreign-symlink"
+	case ConflictOccupiedPath:
+		return "occupied-path"
+	default:
+		return "unknown-conflict"
+	}
 }
 
 // Shadow is a valid desire overridden at its target by a higher-precedence
@@ -401,6 +427,7 @@ func planOps(winners map[string]DesiredLink, world World, opts Options) ([]Op, [
 			case !opts.managed(entry.Dest):
 				// A symlink botfile did not create: not ours, never clobber (33, 35).
 				conflicts = append(conflicts, Conflict{
+					Kind:   ConflictForeignSymlink,
 					Target: target, Dest: want.Dest, SourceName: want.Source.Name,
 					Reason: "a symlink not managed by botfile already exists at this path",
 				})
@@ -411,6 +438,7 @@ func planOps(winners map[string]DesiredLink, world World, opts Options) ([]Op, [
 			}
 		case Foreign:
 			conflicts = append(conflicts, Conflict{
+				Kind:   ConflictOccupiedPath,
 				Target: target, Dest: want.Dest, SourceName: want.Source.Name,
 				Reason: "a non-symlink file or directory already exists at this path",
 			})

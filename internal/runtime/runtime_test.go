@@ -136,7 +136,7 @@ func TestBlockersClassifyAllIncompleteModelCauses(t *testing.T) {
 		}},
 		Plan: reconcile.Plan{
 			Problems:  []reconcile.Problem{{Kind: reconcile.ProblemAmbiguousTarget, Target: "/t/x", Detail: "ambiguous"}},
-			Conflicts: []reconcile.Conflict{{Target: "/t/y", Reason: "foreign file"}},
+			Conflicts: []reconcile.Conflict{{Kind: reconcile.ConflictOccupiedPath, Target: "/t/y", Reason: "foreign file"}},
 		},
 	}
 	bs := blockers(m)
@@ -154,7 +154,7 @@ func TestBlockersClassifyAllIncompleteModelCauses(t *testing.T) {
 		BlockerScanProblem:       "skill-missing-manifest",
 		BlockerProjectionProblem: "empty-selection",
 		BlockerPlanProblem:       "ambiguous-target",
-		BlockerConflict:          "conflict",
+		BlockerConflict:          "occupied-path",
 	}
 	for k, c := range want {
 		if got[k] != c {

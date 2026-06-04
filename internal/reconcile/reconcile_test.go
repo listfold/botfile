@@ -72,8 +72,8 @@ func TestForeignFileIsConflictNeverClobbered(t *testing.T) {
 	if len(plan.Ops) != 0 {
 		t.Fatalf("a foreign file must never be clobbered, got ops %+v", plan.Ops)
 	}
-	if len(plan.Conflicts) != 1 || plan.Conflicts[0].Target != "/t/go" {
-		t.Fatalf("expected one conflict at /t/go, got %+v", plan.Conflicts)
+	if len(plan.Conflicts) != 1 || plan.Conflicts[0].Target != "/t/go" || plan.Conflicts[0].Kind != ConflictOccupiedPath {
+		t.Fatalf("expected one occupied-path conflict at /t/go, got %+v", plan.Conflicts)
 	}
 }
 
@@ -87,8 +87,8 @@ func TestForeignSymlinkIsConflict(t *testing.T) {
 	if len(plan.Ops) != 0 {
 		t.Fatalf("a foreign symlink must not be clobbered, got ops %+v", plan.Ops)
 	}
-	if len(plan.Conflicts) != 1 {
-		t.Fatalf("expected one conflict, got %+v", plan.Conflicts)
+	if len(plan.Conflicts) != 1 || plan.Conflicts[0].Kind != ConflictForeignSymlink {
+		t.Fatalf("expected one foreign-symlink conflict, got %+v", plan.Conflicts)
 	}
 }
 
