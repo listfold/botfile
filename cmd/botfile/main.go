@@ -6,7 +6,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,33 +27,52 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
-// run parses the verb, executes it, and returns the process exit code:
+// run parses the verb against the command contract, executes it, and returns
+// the process exit code:
 //
 //	0 success (plan produced, or sync applied / nothing to do)
 //	1 blocked (a problem or conflict prevented apply)
 //	2 failed  (an effect or usage error)
 func run(args []string) int {
 	if len(args) == 0 {
-		usage()
+		usage(os.Stderr)
 		return 2
 	}
-	switch args[0] {
-	case "plan":
-		return runMode(args, runtime.ModePlan)
-	case "sync":
-		return runMode(args, runtime.ModeSync)
-	case "status":
-		return runMode(args, runtime.ModeStatus)
-	case "adopt":
-		return runAdopt(args[1:])
-	case "-h", "--help", "help":
-		usage()
+	if a := args[0]; a == "-h" || a == "--help" || a == "help" {
+		usage(os.Stdout)
 		return 0
-	default:
-		fmt.Fprintf(os.Stderr, "botfile: unknown command %q\n\n", args[0])
-		usage()
-		return 2
 	}
+	inv, err := parse(args)
+	if err != nil {
+		return usageErr(err)
+	}
+
+	var req adopt.Request
+	if inv.Cmd.Mode == runtime.ModeAdopt {
+		if req, err = adoptRequest(inv); err != nil {
+			return usageErr(err)
+		}
+	}
+
+	e, code := resolveEnv()
+	if code != 0 {
+		return code
+	}
+	model, cmd := runtime.Init(inv.Cmd.Mode, e.configPath, e.home, e.agents, e.roots)
+	if inv.Cmd.Mode == runtime.ModeAdopt {
+		req.Path = resolvePath(req.Path, e.home)
+		model.Adopt = req
+	}
+	model = interp.OSDeps(e.home).Run(model, cmd)
+	return render(os.Stdout, model)
+}
+
+// usageErr reports a usage-level failure (bad verb, flag, or argument) followed
+// by the command summary, and returns the usage exit code.
+func usageErr(err error) int {
+	fmt.Fprintf(os.Stderr, "botfile: %v\n\n", err)
+	usage(os.Stderr)
+	return 2
 }
 
 // env is the environment the interpreter and reducer need, resolved once at the
@@ -83,74 +101,6 @@ func resolveEnv() (env, int) {
 	return env{configPath, home, agents, agents.ResolveRoots(home, os.Getenv)}, 0
 }
 
-// runMode runs a no-argument verb (plan, sync, status).
-func runMode(args []string, mode runtime.Mode) int {
-	if len(args) != 1 {
-		fmt.Fprintf(os.Stderr, "botfile %s: takes no arguments\n", args[0])
-		return 2
-	}
-	e, code := resolveEnv()
-	if code != 0 {
-		return code
-	}
-	model, cmd := runtime.Init(mode, e.configPath, e.home, e.agents, e.roots)
-	model = interp.OSDeps(e.home).Run(model, cmd)
-	return render(os.Stdout, model)
-}
-
-// runAdopt parses `adopt <path> --into <source>/<plugin>` and runs it.
-func runAdopt(args []string) int {
-	req, err := parseAdopt(args)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "botfile adopt: %v\n\n", err)
-		usage()
-		return 2
-	}
-	e, code := resolveEnv()
-	if code != 0 {
-		return code
-	}
-	req.Path = resolvePath(req.Path, e.home)
-
-	model, cmd := runtime.Init(runtime.ModeAdopt, e.configPath, e.home, e.agents, e.roots)
-	model.Adopt = req
-	model = interp.OSDeps(e.home).Run(model, cmd)
-	return render(os.Stdout, model)
-}
-
-// parseAdopt extracts the path and the --into <source>/<plugin> from the adopt
-// arguments.
-func parseAdopt(args []string) (adopt.Request, error) {
-	var path, into string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "--into":
-			i++
-			if i >= len(args) {
-				return adopt.Request{}, errors.New("--into needs a <source>/<plugin> value")
-			}
-			into = args[i]
-		case strings.HasPrefix(a, "--into="):
-			into = strings.TrimPrefix(a, "--into=")
-		case strings.HasPrefix(a, "-"):
-			return adopt.Request{}, fmt.Errorf("unknown flag %q", a)
-		case path == "":
-			path = a
-		default:
-			return adopt.Request{}, fmt.Errorf("unexpected argument %q", a)
-		}
-	}
-	if path == "" {
-		return adopt.Request{}, errors.New("missing <path> to adopt")
-	}
-	source, plugin, ok := strings.Cut(into, "/")
-	if !ok || source == "" || plugin == "" {
-		return adopt.Request{}, fmt.Errorf("--into must be <source>/<plugin>, got %q", into)
-	}
-	return adopt.Request{Path: path, SourceName: source, PluginName: plugin}, nil
-}
-
 // resolvePath expands a leading ~ and makes the path absolute (relative to the
 // working directory, where a path argument is naturally rooted).
 func resolvePath(path, home string) string {
@@ -164,18 +114,6 @@ func resolvePath(path, home string) string {
 		return abs
 	}
 	return path
-}
-
-func usage() {
-	fmt.Fprint(os.Stderr, `botfile manages your agents' config and context, like dotfiles.
-
-usage:
-  botfile plan                          show what a sync would change
-  botfile sync                          reconcile your agents to match your config
-  botfile status                        show what is managed, out of sync, and adoptable
-  botfile adopt <path> --into <src>/<plugin>
-                                        bring an agent-created component under management
-`)
 }
 
 // render writes a full summary of the run, mapping every outcome the model
