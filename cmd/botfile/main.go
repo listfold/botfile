@@ -116,17 +116,16 @@ func resolvePath(path, home string) string {
 // emit classifies the run into a presentation Report and writes it in the chosen
 // format ("text" or "json"), returning the report's exit code. All outcome logic
 // lives in internal/output, the single source shared by both renderers, so the
-// exit code is identical regardless of format.
+// exit code is identical regardless of format. Writes are best-effort: as in the
+// text path, a write failure (a closed pipe, say) does not change the run's
+// outcome code, so Report.ExitCode stays authoritative for both formats.
 func emit(w io.Writer, m runtime.Model, format string) int {
 	r := output.ReportFromModel(m)
 	if format == "json" {
-		if err := output.RenderJSON(w, r); err != nil {
-			fmt.Fprintf(os.Stderr, "botfile: encode json: %v\n", err)
-			return 2
-		}
-		return r.ExitCode
+		_ = output.RenderJSON(w, r)
+	} else {
+		output.RenderText(w, r)
 	}
-	output.RenderText(w, r)
 	return r.ExitCode
 }
 

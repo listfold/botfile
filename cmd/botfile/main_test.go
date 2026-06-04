@@ -10,10 +10,31 @@ import (
 	"codeberg.org/botfile/botfile/internal/adopt"
 	"codeberg.org/botfile/botfile/internal/core"
 	"codeberg.org/botfile/botfile/internal/discover"
+	"codeberg.org/botfile/botfile/internal/output"
 	"codeberg.org/botfile/botfile/internal/project"
 	"codeberg.org/botfile/botfile/internal/reconcile"
 	"codeberg.org/botfile/botfile/internal/runtime"
 )
+
+// errWriter fails every write, standing in for a closed pipe.
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) { return 0, errors.New("pipe closed") }
+
+// TestEmitWriteErrorKeepsExitCode pins that a write failure does not change the
+// exit code, and does so identically for both renderers: Report.ExitCode stays
+// authoritative regardless of format.
+func TestEmitWriteErrorKeepsExitCode(t *testing.T) {
+	t.Parallel()
+	m := runtime.Model{Mode: runtime.ModePlan, Phase: runtime.PhaseBlocked, Blockers: []runtime.Blocker{{Kind: runtime.BlockerConflict, Cause: "conflict", Ref: "/t", Detail: "x"}}}
+	want := output.ReportFromModel(m).ExitCode // blocked -> 1
+	if c := emit(errWriter{}, m, "text"); c != want {
+		t.Errorf("text exit on write error = %d, want %d", c, want)
+	}
+	if c := emit(errWriter{}, m, "json"); c != want {
+		t.Errorf("json exit on write error = %d, want %d", c, want)
+	}
+}
 
 // TestEmitFormatParity checks that the text and JSON renderers agree on the exit
 // code for every outcome, and that the JSON form is always valid and carries the
