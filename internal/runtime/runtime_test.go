@@ -144,13 +144,21 @@ func TestBlockersClassifyAllIncompleteModelCauses(t *testing.T) {
 	if len(bs) != 4 {
 		t.Fatalf("blockers = %+v, want 4 (unsupported excluded)", bs)
 	}
-	kinds := map[BlockerKind]bool{}
+	// Pin the (Kind, Cause) pairs at the producer: Cause is the fine-grained
+	// token machine consumers read, derived here from each raw branch's sub-kind.
+	got := map[BlockerKind]string{}
 	for _, b := range bs {
-		kinds[b.Kind] = true
+		got[b.Kind] = b.Cause
 	}
-	for _, want := range []BlockerKind{BlockerScanProblem, BlockerProjectionProblem, BlockerPlanProblem, BlockerConflict} {
-		if !kinds[want] {
-			t.Errorf("missing blocker kind %v", want)
+	want := map[BlockerKind]string{
+		BlockerScanProblem:       "skill-missing-manifest",
+		BlockerProjectionProblem: "empty-selection",
+		BlockerPlanProblem:       "ambiguous-target",
+		BlockerConflict:          "conflict",
+	}
+	for k, c := range want {
+		if got[k] != c {
+			t.Errorf("blocker %v cause = %q, want %q", k, got[k], c)
 		}
 	}
 }
