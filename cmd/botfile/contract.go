@@ -182,14 +182,22 @@ func parseAdopt(args []string) (adopt.Request, error) {
 	return adoptRequest(inv)
 }
 
-// usage prints the command summary, generated from the commands table so it
-// cannot drift from what the parser accepts (patterns.md 6).
+// usage prints the command summary, generated from the commands and globalFlags
+// tables so it cannot drift from what the parser accepts (patterns.md 6, 7):
+// every flag parse honors is advertised here, including global flags.
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "botfile manages your agents' config and context, like dotfiles.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "usage:")
 	for _, c := range commands {
 		fmt.Fprintf(w, "  %s\n      %s\n", invocationLine(c), c.Summary)
+	}
+	if len(globalFlags) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "global options (any command):")
+		for _, f := range globalFlags {
+			fmt.Fprintf(w, "  --%s %s\n", f.Name, flagPlaceholder(f))
+		}
 	}
 }
 
@@ -201,11 +209,20 @@ func invocationLine(c Command) string {
 		parts = append(parts, "<"+a.Name+">")
 	}
 	for _, f := range c.Flags {
-		ph := f.Value
-		if ph == "" {
-			ph = "<" + f.Name + ">"
-		}
-		parts = append(parts, "--"+f.Name+" "+ph)
+		parts = append(parts, "--"+f.Name+" "+flagPlaceholder(f))
 	}
 	return strings.Join(parts, " ")
+}
+
+// flagPlaceholder is the value hint shown for a flag in usage: its explicit
+// Value, else its enum alternatives, else its name.
+func flagPlaceholder(f Flag) string {
+	switch {
+	case f.Value != "":
+		return f.Value
+	case len(f.Enum) > 0:
+		return "<" + strings.Join(f.Enum, "|") + ">"
+	default:
+		return "<" + f.Name + ">"
+	}
 }

@@ -65,6 +65,31 @@ func TestParseRejects(t *testing.T) {
 	}
 }
 
+func TestGlobalFlagParsedAndDocumented(t *testing.T) {
+	// Not parallel: it mutates the shared globalFlags table. This pins the
+	// contract's core invariant for any future shared flag (like --format): parse
+	// must accept exactly what usage advertises, and vice versa.
+	saved := globalFlags
+	globalFlags = []Flag{{Name: "format", Enum: []string{"text", "json"}, Default: "text"}}
+	defer func() { globalFlags = saved }()
+
+	inv, err := parse([]string{"plan", "--format", "json"})
+	if err != nil || inv.Flags["format"] != "json" {
+		t.Fatalf("parse with global flag = %v, %v", inv.Flags, err)
+	}
+	if inv, _ := parse([]string{"status"}); inv.Flags["format"] != "text" {
+		t.Errorf("global flag default not applied: %v", inv.Flags)
+	}
+	if _, err := parse([]string{"plan", "--format", "yaml"}); err == nil {
+		t.Errorf("out-of-enum global flag should error")
+	}
+	var buf bytes.Buffer
+	usage(&buf)
+	if !strings.Contains(buf.String(), "--format") {
+		t.Errorf("usage omits global flag --format\n%s", buf.String())
+	}
+}
+
 func TestUsageListsEveryCommand(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
