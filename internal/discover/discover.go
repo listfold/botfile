@@ -108,10 +108,12 @@ func classify(fsys fsport.FS, ns Namespace, name, path string, entry fsport.Entr
 			return Unmanaged{}, false // an instruction is a regular file (manifesto 48)
 		}
 		// A singleton (fixed-file) instruction takes its identity from its agent,
-		// not its filename: every agent's file is named the same (AGENTS.md), so the
-		// filename does not distinguish them and naming several "AGENTS" would
-		// collide when adopted into one plugin. The agent is the distinguishing,
-		// stable name (~/.codex/AGENTS.md -> instruction/codex-cli).
+		// not its filename: the fixed filename is an agent install-path detail, not
+		// a portable identity, and several agents share the AGENTS.md basename
+		// (copilot-cli's is copilot-instructions.md), so the filename does not
+		// distinguish them and naming several "AGENTS" would collide when adopted
+		// into one plugin. The agent is the distinguishing, stable name
+		// (~/.codex/AGENTS.md -> instruction/codex-cli).
 		if ns.File != "" {
 			if len(ns.Agents) == 0 {
 				return Unmanaged{}, false
