@@ -79,6 +79,16 @@ type Base struct {
 // InstallRule is the vendor spec for one (agent, kind) cell: the rubric tier plus
 // the path projection (the kind's directory relative to the agent's config root,
 // and how the component leaf is named).
+//
+// Shared-first policy: a cell records the single namespace botfile *installs*
+// into, not every namespace the agent *reads*. When an agent reads several native
+// directories for a kind at user scope (crush, for example, reads ~/.agents/skills,
+// ~/.claude/skills, ~/.config/crush/skills, and ~/.config/agents/skills for
+// skills), botfile targets the shared cross-agent namespace (~/.agents/skills), so
+// one symlink serves every reader, accepting the coarser visibility of manifesto
+// 49. Modeling every directory an agent reads would be a separate concept (split
+// this install rule from a read-namespaces set); it is not needed while install is
+// shared-first.
 type InstallRule struct {
 	Tier Tier
 	// Base optionally overrides the agent's default config root for this kind.
