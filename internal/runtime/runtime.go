@@ -105,7 +105,12 @@ func (k BlockerKind) String() string {
 // never scanned for orphans, it is expected partial coverage, and it is
 // persistent, so it is reported but never blocks.
 type Blocker struct {
-	Kind   BlockerKind
+	Kind BlockerKind
+	// Cause is the specific sub-kind token behind the coarse Kind (for example
+	// "ambiguous-target" or "skill-missing-manifest"), so a machine consumer can
+	// branch on the precise reason that Kind groups. Conflicts have no sub-kind
+	// enum yet, so theirs is the coarse "conflict".
+	Cause  string
 	Ref    string // the path, source, or component the blocker concerns
 	Detail string
 }
@@ -377,7 +382,7 @@ func (m Model) Done() bool {
 func blockers(m Model) []Blocker {
 	var bs []Blocker
 	for _, p := range m.ScanProblems {
-		bs = append(bs, Blocker{Kind: BlockerScanProblem, Ref: p.Problem.Path, Detail: p.Problem.Detail})
+		bs = append(bs, Blocker{Kind: BlockerScanProblem, Cause: p.Problem.Kind.String(), Ref: p.Problem.Path, Detail: p.Problem.Detail})
 	}
 	for _, p := range m.Projection.Problems {
 		if p.Kind == project.ProblemUnsupported {
@@ -387,13 +392,13 @@ func blockers(m Model) []Blocker {
 		if p.Component != "" {
 			ref = p.SourceName + ":" + p.Component
 		}
-		bs = append(bs, Blocker{Kind: BlockerProjectionProblem, Ref: ref, Detail: p.Detail})
+		bs = append(bs, Blocker{Kind: BlockerProjectionProblem, Cause: p.Kind.String(), Ref: ref, Detail: p.Detail})
 	}
 	for _, p := range m.Plan.Problems {
-		bs = append(bs, Blocker{Kind: BlockerPlanProblem, Ref: p.Target, Detail: p.Detail})
+		bs = append(bs, Blocker{Kind: BlockerPlanProblem, Cause: p.Kind.String(), Ref: p.Target, Detail: p.Detail})
 	}
 	for _, c := range m.Plan.Conflicts {
-		bs = append(bs, Blocker{Kind: BlockerConflict, Ref: c.Target, Detail: c.Reason})
+		bs = append(bs, Blocker{Kind: BlockerConflict, Cause: BlockerConflict.String(), Ref: c.Target, Detail: c.Reason})
 	}
 	return bs
 }
