@@ -400,12 +400,12 @@ func NewSet(specs ...Spec) (Set, error) {
 // data is a construction panic, not a silently broken matrix.
 //
 // Skills (tier 1 auto-discovery: one directory per skill, each with a SKILL.md,
-// found by presence, manifesto 17, 22, 48) are specified for claude-code,
-// codex-cli, copilot-cli, crush, opencode, and pi.dev. Five of those (codex-cli,
-// copilot-cli, crush, opencode, pi.dev) read the cross-agent ~/.agents/skills
-// drop-in, so botfile targets that shared directory for all of them: one symlink
-// serves every reader, at the cost of coarse selection across the pool (manifesto
-// 49; callouts/per-agent-skill-selection-needs-isolated-namespaces.md). claude-code does not read the
+// found by presence, manifesto 17, 22, 48) are specified for every agent. Six of
+// them (codex-cli, copilot-cli, copilot-vscode, crush, opencode, pi.dev) read the
+// cross-agent ~/.agents/skills drop-in, so botfile targets that shared directory
+// for all of them: one symlink serves every reader, at the cost of coarse
+// selection across the pool (manifesto 49;
+// callouts/per-agent-skill-selection-needs-isolated-namespaces.md). claude-code does not read the
 // shared dir (only ~/.claude/skills), so it stays isolated and keeps per-agent
 // selection. opencode also reads ~/.config/opencode/skills and ~/.claude/skills,
 // pi.dev also reads ~/.pi/agent/skills, and crush also reads ~/.claude/skills,
@@ -413,17 +413,17 @@ func NewSet(specs ...Spec) (Set, error) {
 // dir on purpose, to stay on the cross-agent convention.
 //
 // Instructions (manifesto 18) are specified for every agent, in one of two
-// shapes. claude-code exposes a drop-in directory of one file per instruction
-// (~/.claude/rules/, LeafFile, tier 1), so botfile fans out one symlink per
-// instruction. The others read a single fixed file (codex-cli ~/.codex/AGENTS.md,
-// opencode ~/.config/opencode/AGENTS.md, pi.dev ~/.pi/agent/AGENTS.md, copilot-cli
-// ~/.copilot/copilot-instructions.md, crush ~/.config/crush/CRUSH.md): a LeafFixed
-// singleton on its own root
-// (slice 2's per-kind base). botfile installs into it like any other target and
-// never clobbers; where a user-authored file already sits there the reconcile
-// conflict rules (manifesto 35) report it and refuse to sync, and the user
-// reconciles it out of band (typically by adopting their file, 50). copilot-vscode
-// is pending vendor confirmation. See
+// shapes. claude-code (~/.claude/rules/, ".md") and copilot-vscode
+// (~/.copilot/instructions/, ".instructions.md") expose a drop-in directory of
+// one file per instruction (LeafFile, tier 1), so botfile fans out one symlink
+// per instruction, isolated per agent. The others read a single fixed file
+// (codex-cli ~/.codex/AGENTS.md, opencode ~/.config/opencode/AGENTS.md, pi.dev
+// ~/.pi/agent/AGENTS.md, copilot-cli ~/.copilot/copilot-instructions.md, crush
+// ~/.config/crush/CRUSH.md): a LeafFixed singleton on its own root. botfile
+// installs into it like any other target and never clobbers; where a
+// user-authored file already sits there the reconcile conflict rules (manifesto
+// 35) report it and refuse to sync, and the user reconciles it out of band
+// (typically by adopting their file, 50). See
 // callouts/instructions-are-one-kind-distribute-or-adopt.md.
 func Default() Set {
 	set, err := NewSet(
@@ -483,6 +483,28 @@ func Default() Set {
 				core.KindInstruction: {
 					Tier: Tier2, Base: &Base{HomeRelative: []string{".copilot"}, EnvOverride: "COPILOT_HOME"},
 					Shape: LeafFixed, Filename: "copilot-instructions.md",
+				},
+			},
+		},
+		Spec{
+			// copilot-vscode (the VS Code Copilot client) reads the cross-agent
+			// ~/.agents/skills (alongside ~/.copilot/skills and ~/.claude/skills);
+			// under shared-first botfile installs skills to the shared ~/.agents/skills.
+			// Source: code.visualstudio.com/docs/agent-customization/agent-skills.
+			ID:   core.AgentCopilotVSCode,
+			Base: Base{HomeRelative: []string{".agents"}},
+			Rules: map[core.Kind]InstallRule{
+				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
+				// Unlike copilot-cli, the VS Code client auto-loads the user-level
+				// drop-in directory ~/.copilot/instructions/<name>.instructions.md by
+				// presence (the chat.instructionsFilesLocations defaults include it;
+				// verified empirically). So it is a tier-1 drop-in like claude-code's
+				// rules/, not a singleton: many instructions coexist, isolated per
+				// agent. The install leaf has the compound extension .instructions.md.
+				// Source: code.visualstudio.com/docs/agent-customization/custom-instructions.
+				core.KindInstruction: {
+					Tier: Tier1, Base: &Base{HomeRelative: []string{".copilot"}},
+					Segments: []string{"instructions"}, Shape: LeafFile, Ext: ".instructions.md",
 				},
 			},
 		},

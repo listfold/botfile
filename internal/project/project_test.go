@@ -71,25 +71,48 @@ func TestProjectSpecificComponent(t *testing.T) {
 	}
 }
 
+// skillOnlyMatrix is a custom matrix with claude-code fully supported and one
+// skill-only agent (pi.dev), so an instruction selected for the skill-only agent
+// is unsupported. Every default agent now supports both kinds, so an unsupported
+// cell needs a custom matrix.
+func skillOnlyMatrix(t *testing.T) (agent.Set, agent.Roots) {
+	t.Helper()
+	set, err := agent.NewSet(
+		agent.Spec{ID: core.AgentClaudeCode, Base: agent.Base{HomeRelative: []string{".claude"}},
+			Rules: map[core.Kind]agent.InstallRule{
+				core.KindSkill:       {Tier: agent.Tier1, Segments: []string{"skills"}, Shape: agent.LeafDir},
+				core.KindInstruction: {Tier: agent.Tier1, Segments: []string{"rules"}, Shape: agent.LeafFile, Ext: ".md"},
+			}},
+		agent.Spec{ID: core.AgentPiDev, Base: agent.Base{HomeRelative: []string{".pi", "agent"}},
+			Rules: map[core.Kind]agent.InstallRule{
+				core.KindSkill: {Tier: agent.Tier1, Segments: []string{"skills"}, Shape: agent.LeafDir},
+			}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return set, set.ResolveRoots("/home/u", func(string) string { return "" })
+}
+
 func TestProjectUnsupportedAgentIsProblem(t *testing.T) {
 	t.Parallel()
-	// copilot-vscode has no vendor spec yet: each matched component for it is an
-	// explicit unsupported problem, while claude-code still gets its links.
+	// pi.dev is skill-only in this matrix: its instruction is an explicit
+	// unsupported problem, while claude-code (full) still gets all its links.
+	set, rts := skillOnlyMatrix(t)
 	cfg := cfgWith(core.Selection{
 		SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
-		Agents: []core.AgentID{core.AgentClaudeCode, core.AgentCopilotVSCode},
+		Agents: []core.AgentID{core.AgentClaudeCode, core.AgentPiDev},
 	})
-	res := Project(cfg, []Source{codingSource()}, agent.Default(), roots())
-	if len(res.Links) != 2 {
-		t.Fatalf("claude-code links = %+v, want 2", res.Links)
+	res := Project(cfg, []Source{codingSource()}, set, rts)
+	// claude-code: skill + instruction = 2 links; pi.dev: skill link, instruction unsupported.
+	if len(res.Links) != 3 {
+		t.Fatalf("links = %+v, want 3 (claude skill+instruction, pi.dev skill)", res.Links)
 	}
-	if len(res.Problems) != 2 {
-		t.Fatalf("want 2 unsupported problems for copilot-vscode, got %+v", res.Problems)
+	if len(res.Problems) != 1 {
+		t.Fatalf("want 1 unsupported problem (pi.dev instruction), got %+v", res.Problems)
 	}
-	for _, p := range res.Problems {
-		if p.Kind != ProblemUnsupported || p.Agent != core.AgentCopilotVSCode {
-			t.Fatalf("unexpected problem %+v", p)
-		}
+	if p := res.Problems[0]; p.Kind != ProblemUnsupported || p.Agent != core.AgentPiDev {
+		t.Fatalf("unexpected problem %+v", p)
 	}
 }
 
@@ -234,9 +257,9 @@ func TestProjectUnknownSourceIsProblem(t *testing.T) {
 func TestProjectSharedSkillNamespaceNotice(t *testing.T) {
 	t.Parallel()
 	// Scoping a skill to copilot-cli alone still installs it into the shared
-	// ~/.agents/skills, which codex-cli, crush, opencode, and pi.dev also read. The
-	// projection must say so (manifesto 49), so the user is not misled into
-	// thinking the other readers are excluded.
+	// ~/.agents/skills, which codex-cli, copilot-vscode, crush, opencode, and pi.dev
+	// also read. The projection must say so (manifesto 49), so the user is not
+	// misled into thinking the other readers are excluded.
 	cfg := cfgWith(core.Selection{
 		SourceName: "team", PluginName: core.Wildcard, ComponentID: "skill/go-style",
 		Agents: []core.AgentID{core.AgentCopilotCLI},
@@ -255,7 +278,7 @@ func TestProjectSharedSkillNamespaceNotice(t *testing.T) {
 	if len(n.Selected) != 1 || n.Selected[0] != core.AgentCopilotCLI {
 		t.Errorf("notice.Selected = %v, want [copilot-cli]", n.Selected)
 	}
-	wantReaches := []core.AgentID{core.AgentCodexCLI, core.AgentCrush, core.AgentOpenCode, core.AgentPiDev}
+	wantReaches := []core.AgentID{core.AgentCodexCLI, core.AgentCopilotVSCode, core.AgentCrush, core.AgentOpenCode, core.AgentPiDev}
 	if !reflect.DeepEqual(n.AlsoReaches, wantReaches) {
 		t.Errorf("notice.AlsoReaches = %v, want %v", n.AlsoReaches, wantReaches)
 	}
@@ -300,7 +323,7 @@ func TestProjectWholePoolNoNotice(t *testing.T) {
 	// Naming the whole shared pool is not a surprise: no notice.
 	cfg := cfgWith(core.Selection{
 		SourceName: "team", PluginName: core.Wildcard, ComponentID: "skill/go-style",
-		Agents: []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI, core.AgentCrush, core.AgentOpenCode, core.AgentPiDev},
+		Agents: []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI, core.AgentCopilotVSCode, core.AgentCrush, core.AgentOpenCode, core.AgentPiDev},
 	})
 	res := Project(cfg, []Source{codingSource()}, agent.Default(), roots())
 	if len(res.Notices) != 0 {

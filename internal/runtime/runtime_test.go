@@ -214,15 +214,29 @@ func TestSyncBlocksOnScanProblem(t *testing.T) {
 
 func TestSyncProceedsWhenOnlyUnsupported(t *testing.T) {
 	t.Parallel()
-	// A config that selects everything for claude and copilot-vscode: copilot-vscode
-	// has no vendor spec yet, so every component for it is unsupported (a projection
-	// problem). That is expected partial coverage and must NOT block claude's clean
-	// installs.
+	// pi.dev is skill-only in this custom matrix, so selecting an instruction for it
+	// is unsupported: expected partial coverage that must NOT block claude's clean
+	// installs. (Every default agent now supports both kinds, so an unsupported cell
+	// needs a custom matrix.)
+	set, err := agent.NewSet(
+		agent.Spec{ID: core.AgentClaudeCode, Base: agent.Base{HomeRelative: []string{".claude"}},
+			Rules: map[core.Kind]agent.InstallRule{
+				core.KindSkill:       {Tier: agent.Tier1, Segments: []string{"skills"}, Shape: agent.LeafDir},
+				core.KindInstruction: {Tier: agent.Tier1, Segments: []string{"rules"}, Shape: agent.LeafFile, Ext: ".md"},
+			}},
+		agent.Spec{ID: core.AgentPiDev, Base: agent.Base{HomeRelative: []string{".pi", "agent"}},
+			Rules: map[core.Kind]agent.InstallRule{
+				core.KindSkill: {Tier: agent.Tier1, Segments: []string{"skills"}, Shape: agent.LeafDir},
+			}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := core.Config{
 		Sources: []core.Source{{Name: "team", Location: "/src/team"}},
 		Selections: []core.Selection{{
 			SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
-			Agents: []core.AgentID{core.AgentClaudeCode, core.AgentCopilotVSCode},
+			Agents: []core.AgentID{core.AgentClaudeCode, core.AgentPiDev},
 		}},
 	}
 	scanned := project.Source{
@@ -235,7 +249,7 @@ func TestSyncProceedsWhenOnlyUnsupported(t *testing.T) {
 			},
 		}},
 	}
-	m, _ := newModel(t, ModeSync)
+	m, _ := Init(ModeSync, "/cfg/config.toml", "/home/u", set, set.ResolveRoots("/home/u", noEnv))
 	m, _ = Update(m, ConfigLoaded{Config: cfg})
 	m, _ = Update(m, SourcesScanned{Sources: []project.Source{scanned}})
 	m, cmd := Update(m, WorldRead{World: reconcile.World{Entries: map[string]reconcile.Entry{}}})
@@ -254,7 +268,30 @@ func TestSyncProceedsWhenOnlyUnsupported(t *testing.T) {
 		}
 	}
 	if !foundUnsupported {
-		t.Fatal("expected the copilot-vscode unsupported problem to be recorded")
+		t.Fatal("expected the pi.dev unsupported problem to be recorded")
+	}
+}
+
+func TestCopilotVSCodeInstructionNamespaceIsDropIn(t *testing.T) {
+	t.Parallel()
+	// copilot-vscode's instruction surface is a drop-in directory scanned by
+	// presence (~/.copilot/instructions, *.instructions.md), not a managed
+	// singleton file: namespacesFor must carry the compound Ext and no File, so
+	// discovery scans the directory and recovers names by stripping Ext.
+	agents := agent.Default()
+	ns := namespacesFor([]core.AgentID{core.AgentCopilotVSCode}, agents, agents.ResolveRoots("/home/u", noEnv))
+	idx := -1
+	for i := range ns {
+		if ns[i].Kind == core.KindInstruction {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("no instruction namespace for copilot-vscode in %+v", ns)
+	}
+	got := ns[idx]
+	if got.Dir != "/home/u/.copilot/instructions" || got.File != "" || got.Ext != ".instructions.md" {
+		t.Fatalf("instruction namespace = %+v, want dir ~/.copilot/instructions, no File, Ext .instructions.md", got)
 	}
 }
 

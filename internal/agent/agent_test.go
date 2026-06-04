@@ -100,6 +100,30 @@ func TestResolveRootsPerKindOverride(t *testing.T) {
 	}
 }
 
+func TestCopilotVSCodeTargets(t *testing.T) {
+	t.Parallel()
+	ag, ok := Default().Lookup(core.AgentCopilotVSCode)
+	if !ok {
+		t.Fatal("copilot-vscode must be in the default matrix")
+	}
+	roots := Default().ResolveRoots("/home/u", noEnv)
+	skillRoot, _ := roots.For(core.AgentCopilotVSCode, core.KindSkill)
+	if got, _ := ag.Target(skillRoot, core.KindSkill, "go-style"); got != "/home/u/.agents/skills/go-style" {
+		t.Errorf("skill target = %q, want /home/u/.agents/skills/go-style", got)
+	}
+	instrRoot, _ := roots.For(core.AgentCopilotVSCode, core.KindInstruction)
+	if got, _ := ag.Target(instrRoot, core.KindInstruction, "style"); got != "/home/u/.copilot/instructions/style.instructions.md" {
+		t.Errorf("instruction target = %q, want /home/u/.copilot/instructions/style.instructions.md", got)
+	}
+	// It is a drop-in directory, not a singleton, with the compound leaf extension.
+	if _, ok := ag.FixedFile(core.KindInstruction); ok {
+		t.Error("copilot-vscode instruction must be a drop-in (LeafFile), not a singleton")
+	}
+	if ext, ok := ag.LeafExt(core.KindInstruction); !ok || ext != ".instructions.md" {
+		t.Errorf("instruction LeafExt = %q,%v, want .instructions.md", ext, ok)
+	}
+}
+
 func TestSupportsAndUnsupported(t *testing.T) {
 	t.Parallel()
 	ag, _ := Default().Lookup(core.AgentClaudeCode)
@@ -211,13 +235,13 @@ func TestCodexHomeDoesNotMoveSkills(t *testing.T) {
 	}
 }
 
-func TestStillAbsentAgents(t *testing.T) {
+func TestDefaultCoversAllKnownAgents(t *testing.T) {
 	t.Parallel()
-	// Agents without a confirmed vendor spec must stay out of the matrix, so a
-	// selection targeting them is reported unsupported rather than guessed.
-	for _, id := range []core.AgentID{core.AgentCopilotVSCode} {
-		if _, ok := Default().Lookup(id); ok {
-			t.Errorf("%s has no confirmed vendor spec and must not be in the default matrix", id)
+	// Every recognized agent now has a vendor spec, so the default matrix and the
+	// recognized-agent list (core.KnownAgents) stay in lockstep.
+	for _, id := range core.KnownAgents {
+		if _, ok := Default().Lookup(id); !ok {
+			t.Errorf("%s is recognized (KnownAgents) but missing from the default matrix", id)
 		}
 	}
 }
@@ -228,7 +252,7 @@ func TestSharedSkillsPool(t *testing.T) {
 	// resolve skills to the same directory, so the projection sees one shared pool
 	// (one symlink reaches every reader). claude-code stays isolated.
 	roots := Default().ResolveRoots("/home/u", noEnv)
-	for _, id := range []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI, core.AgentCrush, core.AgentOpenCode, core.AgentPiDev} {
+	for _, id := range []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI, core.AgentCopilotVSCode, core.AgentCrush, core.AgentOpenCode, core.AgentPiDev} {
 		ag, ok := Default().Lookup(id)
 		if !ok {
 			t.Fatalf("%s missing from the default matrix", id)
