@@ -338,7 +338,7 @@ func Update(m Model, msg Msg) (Model, Cmd) {
 			if m.Mode == ModeAdopt {
 				// Pure: compute the adopt plan from the request, sources, and the
 				// discovered components, or a problem if it cannot be adopted.
-				plan, prob := adopt.Compute(m.Adopt, m.Config, m.Sources, m.Unmanaged)
+				plan, prob := adopt.Compute(m.Adopt, m.Config, m.Sources, m.Unmanaged, m.Agents)
 				if prob != nil {
 					m.AdoptProblem = prob
 					m.Phase = PhaseBlocked // a request problem, not an effect failure

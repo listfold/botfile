@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/core"
 	"codeberg.org/botfile/botfile/internal/discover"
 	"codeberg.org/botfile/botfile/internal/project"
@@ -58,6 +59,12 @@ const (
 	// so the collision preflight cannot be trusted; adopt refuses rather than
 	// risk a blind move into a half-known source.
 	ProblemSourceUnscannable
+	// ProblemAmbiguousSingleton: after the move, the adopted source would route
+	// more than one instruction to a singleton (LeafFixed) agent's single fixed
+	// file, because an existing broad selection still selects another instruction
+	// for that agent. Adding an exact selection cannot fix this while the broad
+	// one remains, so adopt refuses and asks the user to narrow it.
+	ProblemAmbiguousSingleton
 )
 
 // Problem is a typed reason a request cannot be adopted.
@@ -66,8 +73,11 @@ type Problem struct {
 	Detail string
 }
 
-// Compute returns the adopt Plan for the request, or a Problem. It is pure.
-func Compute(req Request, cfg core.Config, sources []project.Source, found []discover.Unmanaged) (Plan, *Problem) {
+// Compute returns the adopt Plan for the request, or a Problem. It is pure. The
+// matrix is needed for the singleton-cardinality preflight: a LeafFixed agent
+// installs every selected instruction to one fixed file, so adopt must prove the
+// post-move model does not route two of them there.
+func Compute(req Request, cfg core.Config, sources []project.Source, found []discover.Unmanaged, agents agent.Set) (Plan, *Problem) {
 	comp := locate(req.Path, found)
 	if comp == nil {
 		return Plan{}, &Problem{ProblemNotAdoptable,
@@ -100,6 +110,13 @@ func Compute(req Request, cfg core.Config, sources []project.Source, found []dis
 	}
 
 	add := neededSelection(req, *comp, cfg)
+
+	// Singleton-cardinality preflight. A successful adopt must leave a
+	// round-trippable desired model: for a LeafFixed agent, the adopted source
+	// must contribute at most one instruction to the agent's single fixed file.
+	if prob := ambiguousSingleton(req, *comp, cfg, *src, add, agents); prob != nil {
+		return Plan{}, prob
+	}
 
 	return Plan{
 		Kind: comp.Kind, Name: comp.Name, Agents: comp.Agents,
@@ -168,6 +185,13 @@ func neededSelection(req Request, comp discover.Unmanaged, cfg core.Config) *cor
 // coveredBy reports whether any selection already selects this component, in this
 // source and plugin, for the given agent.
 func coveredBy(selections []core.Selection, srcName, pluginName string, comp discover.Unmanaged, a core.AgentID) bool {
+	return selectsComponent(selections, srcName, pluginName, comp.Kind, comp.Name, a)
+}
+
+// selectsComponent reports whether any selection selects the component of the
+// given kind and name, in this source and plugin, for the given agent. A
+// wildcard plugin or component selection matches without naming it.
+func selectsComponent(selections []core.Selection, srcName, pluginName string, kind core.Kind, name string, a core.AgentID) bool {
 	for _, sel := range selections {
 		if sel.SourceName != srcName {
 			continue
@@ -177,7 +201,7 @@ func coveredBy(selections []core.Selection, srcName, pluginName string, comp dis
 		}
 		if !sel.MatchesAllComponents() {
 			ref, _, err := core.ParseComponentID(sel.ComponentID)
-			if err != nil || ref.Kind != comp.Kind || ref.Name != comp.Name {
+			if err != nil || ref.Kind != kind || ref.Name != name {
 				continue
 			}
 		}
@@ -188,4 +212,49 @@ func coveredBy(selections []core.Selection, srcName, pluginName string, comp dis
 		}
 	}
 	return false
+}
+
+// ambiguousSingleton returns a problem when the adopt would leave the adopted
+// source routing more than one instruction to a singleton (LeafFixed) agent's
+// single fixed file. Reconcile classifies that as ProblemAmbiguousTarget per
+// source (a source contributing two destinations to one path), regardless of
+// which plugin holds each, so the count spans every plugin of the source. The
+// adopted component is counted in its destination plugin; existing components
+// are counted where they already live. add is folded into the selection set so
+// a freshly added exact selection still cannot mask a broad one that selects a
+// second instruction for the same singleton.
+func ambiguousSingleton(req Request, comp discover.Unmanaged, cfg core.Config, src project.Source, add *core.Selection, agents agent.Set) *Problem {
+	final := cfg.Selections
+	if add != nil {
+		final = append(append([]core.Selection(nil), cfg.Selections...), *add)
+	}
+	for _, a := range comp.Agents {
+		ag, ok := agents.Lookup(a)
+		if !ok {
+			continue
+		}
+		if _, fixed := ag.FixedFile(comp.Kind); !fixed {
+			continue // a drop-in agent installs each instruction to its own file
+		}
+		count := 0
+		if selectsComponent(final, req.SourceName, req.PluginName, comp.Kind, comp.Name, a) {
+			count++ // the just-adopted component, now in req.PluginName
+		}
+		for _, p := range src.Plugins {
+			for _, c := range p.Components {
+				if c.Kind != comp.Kind {
+					continue
+				}
+				if selectsComponent(final, req.SourceName, p.Name, c.Kind, c.Name, a) {
+					count++
+				}
+			}
+		}
+		if count >= 2 {
+			return &Problem{ProblemAmbiguousSingleton, fmt.Sprintf(
+				"adopting %s would route %d instructions from source %q to %s's single fixed file; narrow the selection so only one instruction in this source targets %s",
+				comp.Ref(), count, req.SourceName, a, a)}
+		}
+	}
+	return nil
 }
