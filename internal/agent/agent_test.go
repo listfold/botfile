@@ -152,6 +152,7 @@ func TestSingletonInstructionTargets(t *testing.T) {
 		{core.AgentOpenCode, "/home/u/.config/opencode/AGENTS.md"},
 		{core.AgentPiDev, "/home/u/.pi/agent/AGENTS.md"},
 		{core.AgentCopilotCLI, "/home/u/.copilot/copilot-instructions.md"},
+		{core.AgentCrush, "/home/u/.config/crush/CRUSH.md"},
 	}
 	for _, tc := range cases {
 		ag, _ := Default().Lookup(tc.id)
@@ -223,11 +224,11 @@ func TestStillAbsentAgents(t *testing.T) {
 
 func TestSharedSkillsPool(t *testing.T) {
 	t.Parallel()
-	// The four agents that read the cross-agent ~/.agents/skills drop-in must all
+	// The agents that read the cross-agent ~/.agents/skills drop-in must all
 	// resolve skills to the same directory, so the projection sees one shared pool
 	// (one symlink reaches every reader). claude-code stays isolated.
 	roots := Default().ResolveRoots("/home/u", noEnv)
-	for _, id := range []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI, core.AgentOpenCode, core.AgentPiDev} {
+	for _, id := range []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI, core.AgentCrush, core.AgentOpenCode, core.AgentPiDev} {
 		ag, ok := Default().Lookup(id)
 		if !ok {
 			t.Fatalf("%s missing from the default matrix", id)

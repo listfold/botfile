@@ -137,6 +137,40 @@ func TestProjectTwoInstructionsToOneSingletonAreAmbiguous(t *testing.T) {
 	}
 }
 
+func TestProjectTwoCrushInstructionsAreAmbiguous(t *testing.T) {
+	t.Parallel()
+	// crush's instruction is a LeafFixed singleton (~/.config/crush/CRUSH.md), so it
+	// obeys the same cardinality rule: two instructions from one source contend for
+	// the one file and reconcile reports an ambiguous target.
+	src := Source{
+		Name: "team", Root: "/src/team",
+		Plugins: []core.Plugin{{
+			Name: "coding",
+			Components: []core.Component{
+				{Kind: core.KindInstruction, Name: "go-style"},
+				{Kind: core.KindInstruction, Name: "review"},
+			},
+		}},
+	}
+	cfg := cfgWith(core.Selection{
+		SourceName: "team", PluginName: core.Wildcard, ComponentID: core.Wildcard,
+		Agents: []core.AgentID{core.AgentCrush},
+	})
+	res := Project(cfg, []Source{src}, agent.Default(), roots())
+	plan := reconcile.Reconcile(res.Links, reconcile.World{}, reconcile.Options{
+		Roots: []reconcile.Root{{Name: "team", Path: "/src/team"}},
+	})
+	found := false
+	for _, p := range plan.Problems {
+		if p.Kind == reconcile.ProblemAmbiguousTarget && p.Target == "/home/u/.config/crush/CRUSH.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want an ambiguous-target problem for crush's CRUSH.md, got %+v", plan.Problems)
+	}
+}
+
 func TestProjectCodexSkillAndSingletonInstruction(t *testing.T) {
 	t.Parallel()
 	// codex-cli installs skills under the shared ~/.agents/skills and its single
@@ -200,7 +234,7 @@ func TestProjectUnknownSourceIsProblem(t *testing.T) {
 func TestProjectSharedSkillNamespaceNotice(t *testing.T) {
 	t.Parallel()
 	// Scoping a skill to copilot-cli alone still installs it into the shared
-	// ~/.agents/skills, which codex-cli, opencode, and pi.dev also read. The
+	// ~/.agents/skills, which codex-cli, crush, opencode, and pi.dev also read. The
 	// projection must say so (manifesto 49), so the user is not misled into
 	// thinking the other readers are excluded.
 	cfg := cfgWith(core.Selection{
@@ -221,7 +255,7 @@ func TestProjectSharedSkillNamespaceNotice(t *testing.T) {
 	if len(n.Selected) != 1 || n.Selected[0] != core.AgentCopilotCLI {
 		t.Errorf("notice.Selected = %v, want [copilot-cli]", n.Selected)
 	}
-	wantReaches := []core.AgentID{core.AgentCodexCLI, core.AgentOpenCode, core.AgentPiDev}
+	wantReaches := []core.AgentID{core.AgentCodexCLI, core.AgentCrush, core.AgentOpenCode, core.AgentPiDev}
 	if !reflect.DeepEqual(n.AlsoReaches, wantReaches) {
 		t.Errorf("notice.AlsoReaches = %v, want %v", n.AlsoReaches, wantReaches)
 	}
@@ -266,7 +300,7 @@ func TestProjectWholePoolNoNotice(t *testing.T) {
 	// Naming the whole shared pool is not a surprise: no notice.
 	cfg := cfgWith(core.Selection{
 		SourceName: "team", PluginName: core.Wildcard, ComponentID: "skill/go-style",
-		Agents: []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI, core.AgentOpenCode, core.AgentPiDev},
+		Agents: []core.AgentID{core.AgentCodexCLI, core.AgentCopilotCLI, core.AgentCrush, core.AgentOpenCode, core.AgentPiDev},
 	})
 	res := Project(cfg, []Source{codingSource()}, agent.Default(), roots())
 	if len(res.Notices) != 0 {

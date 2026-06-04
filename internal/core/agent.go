@@ -21,6 +21,7 @@ const (
 	AgentCodexCLI      AgentID = "codex-cli"
 	AgentCopilotCLI    AgentID = "copilot-cli"
 	AgentCopilotVSCode AgentID = "copilot-vscode"
+	AgentCrush         AgentID = "crush"
 	AgentOpenCode      AgentID = "opencode"
 	AgentPiDev         AgentID = "pi.dev"
 )
@@ -33,6 +34,7 @@ var KnownAgents = []AgentID{
 	AgentCodexCLI,
 	AgentCopilotCLI,
 	AgentCopilotVSCode,
+	AgentCrush,
 	AgentOpenCode,
 	AgentPiDev,
 }

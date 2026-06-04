@@ -463,6 +463,29 @@ func Default() Set {
 			},
 		},
 		Spec{
+			// crush scans several skill dirs, including the cross-agent
+			// ~/.agents/skills drop-in (alongside ~/.claude/skills,
+			// ~/.config/crush/skills, and ~/.config/agents/skills). botfile installs
+			// to the shared ~/.agents/skills so one symlink serves crush and every
+			// other agent that reads it; tier 1, found by presence.
+			// Source: github.com/charmbracelet/crush (Agent Skills).
+			ID:   core.AgentCrush,
+			Base: Base{HomeRelative: []string{".agents"}},
+			Rules: map[core.Kind]InstallRule{
+				core.KindSkill: {Tier: Tier1, Segments: []string{"skills"}, Shape: LeafDir},
+				// crush reads one user-level instruction file at
+				// ~/.config/crush/CRUSH.md (its own, isolated; the generic
+				// ~/.config/AGENTS.md cross-tool surface is deliberately not modeled
+				// here). A singleton, like codex. Project-scoped context files
+				// (./CRUSH.md, ./AGENTS.md) are out of scope: botfile is user-scope.
+				// Source: github.com/charmbracelet/crush.
+				core.KindInstruction: {
+					Tier: Tier2, Base: &Base{HomeRelative: []string{".config", "crush"}},
+					Shape: LeafFixed, Filename: "CRUSH.md",
+				},
+			},
+		},
+		Spec{
 			// opencode scans several skill dirs, including the cross-agent
 			// ~/.agents/skills/<skill>/SKILL.md drop-in (alongside
 			// ~/.config/opencode/skills and ~/.claude/skills). botfile installs to
