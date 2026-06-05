@@ -86,3 +86,10 @@ each for **skills** and **instructions**. Where each installs (and the shared
 
 [`MANIFESTO.md`](MANIFESTO.md) is the single source of truth for what botfile is
 and the principles it holds to.
+
+## License
+
+The **code** is licensed under the Apache License, Version 2.0
+([`LICENSE`](LICENSE), [`NOTICE`](NOTICE)). The **prose** (`MANIFESTO.md` and
+`docs/`) is licensed under Creative Commons Attribution 4.0
+([`LICENSE-docs.md`](LICENSE-docs.md)). Copyright 2026 Iain Maitland.
