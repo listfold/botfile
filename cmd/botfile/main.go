@@ -24,6 +24,15 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
+// version is botfile's release version. It is overridden at release time via
+// -ldflags "-X main.version=<tag>" (GoReleaser); the baked default tracks the
+// current development version.
+var version = "v0.1.0"
+
+// versionLine is the one-line version string `botfile version` and `--version`
+// print.
+func versionLine() string { return "botfile " + version }
+
 // run parses the verb against the command contract, executes it, and returns
 // the process exit code:
 //
@@ -35,8 +44,12 @@ func run(args []string) int {
 		usage(os.Stderr)
 		return 2
 	}
-	if a := args[0]; a == "-h" || a == "--help" || a == "help" {
+	switch args[0] {
+	case "-h", "--help", "help":
 		usage(os.Stdout)
+		return 0
+	case "--version", "version":
+		fmt.Fprintln(os.Stdout, versionLine())
 		return 0
 	}
 	inv, err := parse(args)

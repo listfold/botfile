@@ -202,6 +202,8 @@ func usage(w io.Writer) {
 			fmt.Fprintf(w, "  --%s %s\n", f.Name, flagPlaceholder(f))
 		}
 	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "also: botfile version, botfile help")
 }
 
 // invocationLine renders a command's calling form, for example

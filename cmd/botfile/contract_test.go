@@ -86,6 +86,21 @@ func TestFormatGlobalFlag(t *testing.T) {
 	}
 }
 
+func TestVersionLine(t *testing.T) {
+	t.Parallel()
+	if version == "" {
+		t.Fatal("version must not be empty")
+	}
+	if got, want := versionLine(), "botfile "+version; got != want {
+		t.Errorf("versionLine() = %q, want %q", got, want)
+	}
+	var buf bytes.Buffer
+	usage(&buf)
+	if !strings.Contains(buf.String(), "botfile version") {
+		t.Errorf("usage should mention the version command\n%s", buf.String())
+	}
+}
+
 func TestUsageListsEveryCommand(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
