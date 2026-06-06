@@ -15,6 +15,7 @@ import (
 	"codeberg.org/botfile/botfile/internal/adopt"
 	"codeberg.org/botfile/botfile/internal/agent"
 	"codeberg.org/botfile/botfile/internal/config"
+	"codeberg.org/botfile/botfile/internal/guide"
 	"codeberg.org/botfile/botfile/internal/interp"
 	"codeberg.org/botfile/botfile/internal/output"
 	"codeberg.org/botfile/botfile/internal/runtime"
@@ -33,6 +34,92 @@ var version = "v0.1.0"
 // print.
 func versionLine() string { return "botfile " + version }
 
+// help handles `botfile help [agent]`: the operator guide rendered for a human,
+// in text. `help agent` is an explicit alias for the same agent-facing guide.
+// Both accept --format text|markdown|json and load no config, so help works on a
+// machine with no botfile config at all.
+func help(w io.Writer, rest []string) int { return emitGuide(w, rest, "text") }
+
+// guideCmd handles `botfile guide`: the agent-oriented operator guide. It
+// defaults to markdown (the richest agent-legible form) and accepts
+// --format text|markdown|json. Config-free, like help.
+func guideCmd(w io.Writer, rest []string) int { return emitGuide(w, rest, "markdown") }
+
+// emitGuide parses an optional topic and --format, builds the guide from the
+// canonical command table and agent matrix, and renders it in the chosen format.
+// It never loads config; the config path is shown for reference only, with a
+// conventional fallback when the environment cannot be resolved.
+func emitGuide(w io.Writer, rest []string, defaultFormat string) int {
+	format, ok := guideFormat(rest, defaultFormat)
+	if !ok {
+		return 2
+	}
+	g := guide.Build(displayConfigPath(), commandDocs())
+	switch format {
+	case "json":
+		_ = guide.RenderJSON(w, g)
+	case "markdown":
+		guide.RenderMarkdown(w, g)
+	default:
+		guide.RenderText(w, g)
+	}
+	return 0
+}
+
+// guideFormat scans rest for an optional "agent" topic and a --format value,
+// returning the chosen format (defaulting to def) and whether parsing succeeded.
+// An unknown token or a format outside text|markdown|json prints a usage-style
+// error to stderr and returns false.
+func guideFormat(rest []string, def string) (string, bool) {
+	format := def
+	for i := 0; i < len(rest); i++ {
+		tok := rest[i]
+		switch {
+		case tok == "agent":
+			// an accepted topic alias for the agent guide; nothing to consume
+		case strings.HasPrefix(tok, "--format="):
+			format = strings.TrimPrefix(tok, "--format=")
+		case tok == "--format":
+			i++
+			if i >= len(rest) {
+				fmt.Fprintln(os.Stderr, "botfile: flag \"--format\" needs a value")
+				return "", false
+			}
+			format = rest[i]
+		default:
+			fmt.Fprintf(os.Stderr, "botfile: unexpected argument %q\n", tok)
+			return "", false
+		}
+	}
+	switch format {
+	case "text", "markdown", "json":
+		return format, true
+	default:
+		fmt.Fprintf(os.Stderr, "botfile: --format must be one of text|markdown|json, got %q\n", format)
+		return "", false
+	}
+}
+
+// displayConfigPath returns the config location to show in the guide. The guide
+// must render even when the environment is unresolvable, so a DefaultPath error
+// falls back to the conventional path rather than failing.
+func displayConfigPath() string {
+	if p, err := config.DefaultPath(); err == nil {
+		return p
+	}
+	return "~/.config/botfile/config.toml"
+}
+
+// commandDocs adapts the canonical command table into guide command docs, so the
+// guide's command list cannot drift from what the parser actually accepts.
+func commandDocs() []guide.CommandDoc {
+	docs := make([]guide.CommandDoc, 0, len(commands))
+	for _, c := range commands {
+		docs = append(docs, guide.CommandDoc{Name: c.Name, Summary: c.Summary, Usage: invocationLine(c)})
+	}
+	return docs
+}
+
 // run parses the verb against the command contract, executes it, and returns
 // the process exit code:
 //
@@ -46,8 +133,9 @@ func run(args []string) int {
 	}
 	switch args[0] {
 	case "-h", "--help", "help":
-		usage(os.Stdout)
-		return 0
+		return help(os.Stdout, args[1:])
+	case "guide":
+		return guideCmd(os.Stdout, args[1:])
 	case "--version", "version":
 		fmt.Fprintln(os.Stdout, versionLine())
 		return 0

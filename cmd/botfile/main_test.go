@@ -21,6 +21,59 @@ type errWriter struct{}
 
 func (errWriter) Write([]byte) (int, error) { return 0, errors.New("pipe closed") }
 
+// TestGuideDispatch covers the config-free help/guide surfaces: the right exit
+// codes, format selection (including the markdown default for `guide` and the
+// text default for `help`), the `agent` topic alias, valid JSON, and rejection
+// of a bad format or stray argument. None of these load config.
+func TestGuideDispatch(t *testing.T) {
+	t.Parallel()
+
+	var b bytes.Buffer
+	if code := help(&b, nil); code != 0 {
+		t.Fatalf("help exit = %d, want 0", code)
+	}
+	if out := b.String(); !strings.Contains(out, "MODEL") || !strings.Contains(out, "WORKFLOW") {
+		t.Errorf("help text missing sections:\n%s", out)
+	}
+
+	b.Reset()
+	if code := guideCmd(&b, nil); code != 0 {
+		t.Fatalf("guide exit = %d, want 0", code)
+	}
+	if out := b.String(); !strings.Contains(out, "# botfile") || !strings.Contains(out, "## Model") {
+		t.Errorf("guide default is not markdown:\n%s", out)
+	}
+
+	b.Reset()
+	if code := help(&b, []string{"agent", "--format", "markdown"}); code != 0 {
+		t.Fatalf("help agent exit = %d, want 0", code)
+	}
+	if out := b.String(); !strings.Contains(out, "## Model") {
+		t.Errorf("help agent --format markdown not markdown:\n%s", out)
+	}
+
+	b.Reset()
+	if code := emitGuide(&b, []string{"--format", "json"}, "text"); code != 0 {
+		t.Fatalf("guide json exit = %d, want 0", code)
+	}
+	var doc struct {
+		SchemaVersion int `json:"schemaVersion"`
+	}
+	if err := json.Unmarshal(b.Bytes(), &doc); err != nil {
+		t.Fatalf("guide json invalid: %v\n%s", err, b.String())
+	}
+	if doc.SchemaVersion == 0 {
+		t.Error("guide json missing schemaVersion")
+	}
+
+	if code := emitGuide(&bytes.Buffer{}, []string{"--format", "yaml"}, "text"); code != 2 {
+		t.Errorf("bad format exit = %d, want 2", code)
+	}
+	if code := emitGuide(&bytes.Buffer{}, []string{"bogus"}, "text"); code != 2 {
+		t.Errorf("stray arg exit = %d, want 2", code)
+	}
+}
+
 // TestEmitWriteErrorKeepsExitCode pins that a write failure does not change the
 // exit code, and does so identically for both renderers: Report.ExitCode stays
 // authoritative regardless of format.

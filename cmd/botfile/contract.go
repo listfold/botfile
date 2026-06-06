@@ -189,7 +189,7 @@ func parseAdopt(args []string) (adopt.Request, error) {
 // tables so it cannot drift from what the parser accepts (patterns.md 6, 7):
 // every flag parse honors is advertised here, including global flags.
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "botfile manages your agents' config and context, like dotfiles.")
+	fmt.Fprintln(w, "botfile manages agent skills and instructions.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "usage:")
 	for _, c := range commands {
@@ -203,7 +203,7 @@ func usage(w io.Writer) {
 		}
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "also: botfile version, botfile help")
+	fmt.Fprintln(w, "also: botfile version, botfile help, botfile guide (agent-oriented; --format text|markdown|json)")
 }
 
 // invocationLine renders a command's calling form, for example
