@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"codeberg.org/botfile/botfile/internal/agent"
@@ -74,10 +75,17 @@ type Guide struct {
 
 // Build assembles the guide from the canonical agent matrix and the command
 // docs the cli supplies. configPath is shown as the config location; pass the
-// resolved path, or a conventional fallback if it could not be resolved. The
-// content (Tagline, model terms, workflow, json guidance, config example) lives
-// in copy.go.
-func Build(configPath string, commands []CommandDoc) Guide {
+// resolved path, or a conventional fallback if it could not be resolved.
+//
+// home and getenv resolve the agent install locations exactly as a normal run
+// does (agent roots honor overrides like CLAUDE_CONFIG_DIR, CODEX_HOME, and
+// COPILOT_HOME), so the self-description stays accurate when an agent home is
+// relocated. The env read is injected here, at the boundary, keeping this
+// testable; pass os.UserHomeDir + os.Getenv from the cli. A "~" home (the cli's
+// fallback when the real home is unresolvable) yields documentation-style
+// paths. The content (Tagline, model terms, workflow, json guidance, config
+// example) lives in copy.go.
+func Build(configPath, home string, getenv func(string) string, commands []CommandDoc) Guide {
 	return Guide{
 		SchemaVersion: SchemaVersion,
 		Tagline:       Tagline,
@@ -86,17 +94,19 @@ func Build(configPath string, commands []CommandDoc) Guide {
 		ConfigExample: minimalConfig,
 		Workflow:      workflowSteps,
 		Commands:      commands,
-		Agents:        agentDocs(),
+		Agents:        agentDocs(home, getenv),
 		JSONGuidance:  jsonGuidance,
 	}
 }
 
 // agentDocs derives each agent's install locations from the default matrix,
-// resolved against a "~" home so the paths read as documentation. The order is
-// core.KnownAgents, the canonical agent order.
-func agentDocs() []AgentDoc {
+// resolved against the given home and env lookup so overrides are honored. The
+// home prefix is abbreviated back to "~" for readability (the leaf is already a
+// "<name>" placeholder), while a relocated root outside home shows in full. The
+// order is core.KnownAgents, the canonical agent order.
+func agentDocs(home string, getenv func(string) string) []AgentDoc {
 	set := agent.Default()
-	roots := set.ResolveRoots("~", nil)
+	roots := set.ResolveRoots(home, getenv)
 	docs := make([]AgentDoc, 0, len(core.KnownAgents))
 	for _, id := range core.KnownAgents {
 		ag, ok := set.Lookup(id)
@@ -106,19 +116,37 @@ func agentDocs() []AgentDoc {
 		d := AgentDoc{ID: string(id)}
 		if root, ok := roots.For(id, core.KindSkill); ok {
 			if ns, ok := ag.Namespace(root, core.KindSkill); ok {
-				d.Skills = ns + string(filepath.Separator) + "<name>" + string(filepath.Separator)
+				d.Skills = abbreviateHome(ns, home) + string(filepath.Separator) + "<name>" + string(filepath.Separator)
 			}
 		}
 		if root, ok := roots.For(id, core.KindInstruction); ok {
 			// Target resolves the leaf: a fixed singleton (AGENTS.md) ignores the
 			// placeholder name; a drop-in file uses it (<name>.md).
 			if t, ok := ag.Target(root, core.KindInstruction, "<name>"); ok {
-				d.Instructions = t
+				d.Instructions = abbreviateHome(t, home)
 			}
 		}
 		docs = append(docs, d)
 	}
 	return docs
+}
+
+// abbreviateHome replaces a leading home directory with "~" for display. A path
+// outside home (a relocated root from an override) is returned unchanged, so its
+// real location shows. When home is empty or already "~", there is nothing to
+// abbreviate.
+func abbreviateHome(path, home string) string {
+	if home == "" || home == "~" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	prefix := home + string(filepath.Separator)
+	if strings.HasPrefix(path, prefix) {
+		return "~" + string(filepath.Separator) + path[len(prefix):]
+	}
+	return path
 }
 
 // RenderJSON writes the guide as one indented JSON object plus a newline. The

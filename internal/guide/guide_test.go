@@ -18,7 +18,8 @@ var sampleCommands = []CommandDoc{
 }
 
 func build() Guide {
-	return Build("/home/u/.config/botfile/config.toml", sampleCommands)
+	// home "~", nil env: documentation-style default paths, no overrides.
+	return Build("/home/u/.config/botfile/config.toml", "~", nil, sampleCommands)
 }
 
 func TestBuildHasModelTermsAndWorkflowOrder(t *testing.T) {
@@ -87,6 +88,48 @@ func TestAgentLocationsMatchMatrix(t *testing.T) {
 		if a.Instructions != c.instructions {
 			t.Errorf("%s instructions = %q, want %q", c.id, a.Instructions, c.instructions)
 		}
+	}
+}
+
+func TestAgentLocationsHonorRootOverrides(t *testing.T) {
+	t.Parallel()
+	getenv := func(k string) string {
+		switch k {
+		case "CLAUDE_CONFIG_DIR":
+			return "/work/claude"
+		case "CODEX_HOME":
+			return "/work/codex"
+		case "COPILOT_HOME":
+			return "/work/copilot"
+		}
+		return ""
+	}
+	g := Build("/cfg", "/home/u", getenv, sampleCommands)
+	got := map[string]AgentDoc{}
+	for _, a := range g.Agents {
+		got[a.ID] = a
+	}
+
+	// claude-code's base override relocates both its skills and instructions.
+	if a := got["claude-code"]; a.Skills != "/work/claude/skills/<name>/" || a.Instructions != "/work/claude/rules/<name>.md" {
+		t.Errorf("claude-code did not honor CLAUDE_CONFIG_DIR: %+v", a)
+	}
+	// codex-cli's instruction singleton honors CODEX_HOME; its skills stay in the
+	// shared ~/.agents pool (home-rooted, so abbreviated).
+	if a := got["codex-cli"]; a.Instructions != "/work/codex/AGENTS.md" {
+		t.Errorf("codex-cli did not honor CODEX_HOME: %q", a.Instructions)
+	}
+	if a := got["codex-cli"]; a.Skills != "~/.agents/skills/<name>/" {
+		t.Errorf("codex-cli skills should stay in the shared pool: %q", a.Skills)
+	}
+	// copilot-cli's instruction singleton honors COPILOT_HOME.
+	if a := got["copilot-cli"]; a.Instructions != "/work/copilot/copilot-instructions.md" {
+		t.Errorf("copilot-cli did not honor COPILOT_HOME: %q", a.Instructions)
+	}
+	// copilot-vscode's instruction root has no override, so COPILOT_HOME must not
+	// move it: it stays under the home-rooted ~/.copilot, abbreviated.
+	if a := got["copilot-vscode"]; a.Instructions != "~/.copilot/instructions/<name>.instructions.md" {
+		t.Errorf("copilot-vscode must not honor COPILOT_HOME: %q", a.Instructions)
 	}
 }
 

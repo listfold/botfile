@@ -54,7 +54,15 @@ func emitGuide(w io.Writer, rest []string, defaultFormat string) int {
 	if !ok {
 		return 2
 	}
-	g := guide.Build(displayConfigPath(), commandDocs())
+	// Resolve install locations exactly as a real run does, honoring agent root
+	// overrides (CLAUDE_CONFIG_DIR, CODEX_HOME, COPILOT_HOME) via os.Getenv. An
+	// unresolvable home falls back to "~" so the guide still renders, with
+	// documentation-style default paths.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "~"
+	}
+	g := guide.Build(displayConfigPath(), home, os.Getenv, commandDocs())
 	switch format {
 	case "json":
 		_ = guide.RenderJSON(w, g)
