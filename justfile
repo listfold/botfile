@@ -23,86 +23,25 @@ check:
     scripts/check.sh
 
 # Build a local binary (./{{bin}}); pass a version string to stamp it.
+# quote() wraps the whole ldflags value so an arbitrary version cannot inject shell.
 build version="dev":
-    go build -ldflags "-s -w -X main.version={{ version }}" -o {{ bin }} ./cmd/{{ bin }}
+    go build -ldflags {{ quote("-s -w -X main.version=" + version) }} -o {{ bin }} ./cmd/{{ bin }}
 
 # Install into the Go bin directory via `go install`.
 install:
     go install ./cmd/{{ bin }}
 
 # Cross-compile a working-tree SNAPSHOT into ./{{dist}} (version is just a label).
+# The label is passed as a quoted positional arg; build-matrix.sh reads it as "$1".
 build-all version="dev":
     rm -rf {{ dist }}
-    scripts/build-matrix.sh {{ version }} {{ dist }}
+    scripts/build-matrix.sh {{ quote(version) }} {{ dist }}
 
-# (internal) Cross-compile the TAGGED source into ./{{dist}}, stamped with <tag>.
-# Builds from an isolated export of the tag so artifacts match the tag exactly,
-# regardless of working-tree state or which commit is checked out.
-_build-release tag:
-    #!/usr/bin/env sh
-    set -eu
-    git rev-parse --verify "{{ tag }}^{commit}" >/dev/null
-    work=$(mktemp -d)
-    trap 'rm -rf "$work"' EXIT
-    git archive --format=tar "{{ tag }}" | tar -x -C "$work"
-    rm -rf "{{ dist }}"
-    mkdir -p "{{ dist }}"
-    dist_abs=$(cd "{{ dist }}" && pwd)
-    scripts_abs=$(cd scripts && pwd)
-    ( cd "$work" && "$scripts_abs/build-matrix.sh" "{{ tag }}" "$dist_abs" )
-
-# Build the tagged source for <tag> and publish the assets to the Codeberg release.
-release tag: (_build-release tag)
-    #!/usr/bin/env sh
-    set -eu
-    : "${CODEBERG_TOKEN:?set CODEBERG_TOKEN to a Codeberg API token with repository write scope}"
-    tag="{{ tag }}"
-    api="{{ api }}"
-    auth="Authorization: token ${CODEBERG_TOKEN}"
-    commit=$(git rev-parse --verify "${tag}^{commit}")
-    tmp=$(mktemp -d)
-    trap 'rm -rf "$tmp"' EXIT
-
-    # Find an existing release for the tag; create one ONLY on a clean 404, and
-    # fail loudly on any other status so a transient error is not read as "absent".
-    code=$(curl -sS -o "$tmp/rel" -w '%{http_code}' -H "$auth" "${api}/releases/tags/${tag}")
-    if [ "$code" = 200 ]; then
-        id=$(jq -e -r '.id' <"$tmp/rel")
-        echo "reusing release ${tag} (id ${id})"
-    elif [ "$code" = 404 ]; then
-        echo "creating release ${tag} at ${commit}"
-        payload=$(jq -n --arg t "$tag" --arg c "$commit" \
-            '{tag_name:$t, target_commitish:$c, name:$t, draft:false, prerelease:false}')
-        code=$(curl -sS -o "$tmp/rel" -w '%{http_code}' -H "$auth" \
-            -H 'Content-Type: application/json' -X POST "${api}/releases" -d "$payload")
-        [ "$code" = 201 ] || { echo "create failed (HTTP ${code}):" >&2; cat "$tmp/rel" >&2; exit 1; }
-        id=$(jq -e -r '.id' <"$tmp/rel")
-    else
-        echo "release lookup failed (HTTP ${code}):" >&2; cat "$tmp/rel" >&2; exit 1
-    fi
-
-    # Snapshot existing assets so re-runs converge: delete-and-replace by name,
-    # leaving exactly one copy of each expected asset.
-    code=$(curl -sS -o "$tmp/assets" -w '%{http_code}' -H "$auth" "${api}/releases/${id}/assets")
-    [ "$code" = 200 ] || { echo "asset list failed (HTTP ${code}):" >&2; cat "$tmp/assets" >&2; exit 1; }
-
-    for f in "{{ dist }}"/*; do
-        name=$(basename "$f")
-        old=$(jq -r --arg n "$name" 'map(select(.name == $n)) | .[0].id // empty' <"$tmp/assets")
-        if [ -n "$old" ]; then
-            echo "replacing ${name} (old id ${old})"
-            code=$(curl -sS -o /dev/null -w '%{http_code}' -H "$auth" \
-                -X DELETE "${api}/releases/${id}/assets/${old}")
-            [ "$code" = 204 ] || { echo "delete of ${name} failed (HTTP ${code})" >&2; exit 1; }
-        else
-            echo "uploading ${name}"
-        fi
-        code=$(curl -sS -o "$tmp/up" -w '%{http_code}' -H "$auth" -X POST \
-            "${api}/releases/${id}/assets?name=${name}" \
-            -F "attachment=@${f};type=application/octet-stream")
-        [ "$code" = 201 ] || { echo "upload of ${name} failed (HTTP ${code}):" >&2; cat "$tmp/up" >&2; exit 1; }
-    done
-    echo "released ${tag} -> https://codeberg.org/{{ owner }}/{{ repo }}/releases/tag/${tag}"
+# Build a pushed v* tag's source and publish its assets to the Codeberg release.
+# All validation and shell handling live in scripts/release.sh, which receives
+# the tag as a single quoted positional argument (no raw interpolation here).
+release tag:
+    scripts/release.sh {{ quote(tag) }}
 
 # Remove build artifacts.
 clean:
