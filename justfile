@@ -4,9 +4,9 @@
 # need curl, jq, and a Codeberg API token in $CODEBERG_TOKEN (a token with
 # repository write scope).
 #
-# Cut a release by running `just release <tag>` against a v* tag (the tag must
-# already exist locally). A .githooks/pre-push hook to run this automatically on
-# a v* tag push is added in a later step; until then, release is a manual step.
+# To ship a release: create the tag (git tag vX.Y.Z), then `just publish vX.Y.Z`,
+# which pushes the tag and publishes its built assets. `just release vX.Y.Z` runs
+# only the publish half and requires the tag to already be on origin.
 
 owner := "botfile"
 repo := "botfile"
@@ -37,7 +37,11 @@ build-all version="dev":
     rm -rf {{ dist }}
     scripts/build-matrix.sh {{ quote(version) }} {{ dist }}
 
-# Build a pushed v* tag's source and publish its assets to the Codeberg release.
+# Push a v* tag to origin, then build and publish its Codeberg release (post-push).
+publish tag:
+    scripts/publish.sh {{ quote(tag) }}
+
+# Publish an ALREADY-pushed v* tag's assets to its Codeberg release.
 # All validation and shell handling live in scripts/release.sh, which receives
 # the tag as a single quoted positional argument (no raw interpolation here).
 release tag:

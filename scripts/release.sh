@@ -19,6 +19,7 @@ owner=botfile
 repo=botfile
 api="https://codeberg.org/api/v1/repos/$owner/$repo"
 dist=dist
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 fail() {
 	echo "release: $1" >&2
@@ -26,13 +27,11 @@ fail() {
 }
 
 # --- 1. validate the tag name ------------------------------------------------
-# Strict v-prefixed semver: vMAJOR.MINOR.PATCH with an optional -prerelease.
-# This is the naming contract AND the security gate: it admits no shell
-# metacharacters, whitespace, or '/', so later interpolation into shell, the Go
-# linker flag, and the API URL path is safe and needs no further escaping.
-if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+# valid-tag.sh is the single source of truth for the naming contract: a strict
+# v-prefixed semver that admits no shell metacharacters, whitespace, or '/', so
+# later use in shell, the Go linker flag, and the API URL path is safe.
+"$here/valid-tag.sh" "$tag" ||
 	fail "tag '$tag' is not a valid vMAJOR.MINOR.PATCH[-prerelease] version"
-fi
 
 # --- 2. the tag must exist LOCALLY as a real tag (not a branch or raw SHA) ----
 # Resolving refs/tags/<tag> specifically (not <tag>^{commit}) rejects branch
@@ -61,7 +60,6 @@ commit=$local_commit
 auth="Authorization: token $CODEBERG_TOKEN"
 
 # --- 5. build the tagged source in isolation ---------------------------------
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 work=$(mktemp -d)
 tmp=$(mktemp -d)
 trap 'rm -rf "$work" "$tmp"' EXIT
