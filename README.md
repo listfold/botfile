@@ -58,7 +58,7 @@ botfile plan
 botfile sync
 ```
 
-See the [full walkthrough](docs/try-it-out.md) for the guided version.
+Run `botfile help` for the full operator guide.
 
 ## Commands
 
@@ -68,28 +68,20 @@ See the [full walkthrough](docs/try-it-out.md) for the guided version.
 - `botfile adopt <path> --into <source>/<plugin>`: bring an agent-created
   component under management.
 
-Any command takes `--format json` for machine-readable output
-([docs/output.md](docs/output.md)).
+Any command takes `--format json` for machine-readable output.
 
 ## Supported agents
 
 claude-code, codex-cli, copilot-cli, copilot-vscode, crush, opencode, and pi.dev,
 each for **skills** and **instructions**. Where each installs (and the shared
-`~/.agents/skills` pool) is the [support matrix](docs/config-reference.md).
+`~/.agents/skills` pool) is shown by `botfile help`.
 
 ## Docs
 
-- [Try it out](docs/try-it-out.md) and the [example flow](docs/example-flow.md)
-- [Config reference](docs/config-reference.md) and [source layout](docs/source-layout.md)
-- [Adopting components](docs/adopt.md) and [output formats](docs/output.md)
-- [How botfile compares](docs/comparison.md) to Stow, Tuckr, and chezmoi
-
-[`MANIFESTO.md`](MANIFESTO.md) is the single source of truth for what botfile is
-and the principles it holds to.
+`botfile help` (alias `botfile guide`) is the built-in operator guide; it accepts
+`--format text|markdown|json` and loads no config, so it works on a fresh install.
 
 ## License
 
-The **code** is licensed under the Apache License, Version 2.0
-([`LICENSE`](LICENSE), [`NOTICE`](NOTICE)). The **prose** (`MANIFESTO.md` and
-`docs/`) is licensed under Creative Commons Attribution 4.0
-([`LICENSE-docs.md`](LICENSE-docs.md)). Copyright 2026 Iain Maitland.
+The code is licensed under the Apache License, Version 2.0
+([`LICENSE`](LICENSE), [`NOTICE`](NOTICE)). Copyright 2026 Iain Maitland.
