@@ -1,3 +1,4 @@
 /botfile
+/dist/
 *.test
 .DS_Store
