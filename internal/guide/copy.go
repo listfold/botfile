@@ -27,6 +27,17 @@ var modelTerms = []Term{
 	{"selection", "A config rule mapping a source (and optionally one plugin or component) to one or more agents that should receive it."},
 }
 
+// scopeNotes states botfile's reach: user scope only, fan-out across agents,
+// why the two kinds need different scoping care, and selections that narrow to
+// any depth of source > plugin > component.
+var scopeNotes = []string{
+	"botfile operates at user scope only: the per-user paths under your home directory. It never writes into a project checkout (a repo's .claude/ or an in-repo AGENTS.md); project-scoped components belong to the project.",
+	"Selections fan out: one component reaches every agent its selections name, one symlink per agent's native path, and agents reading the shared ~/.agents/skills pool are served by a single link. Symlinks, not copies, so an edit to the source is live through every agent at once.",
+	"The two kinds differ in reach: a skill is invoked at runtime when relevant, so scoping skills to a subset of agents is rarely critical; an instruction is ambient guidance the agent harness injects into every session, so it matters that instructions can be scoped to all, some, or one agent.",
+	"A selection picks any depth of source > plugin > component: omit plugin and component for the whole source, set plugin for one bundle, set both for a single component (component is <kind>/<name>, like skill/review).",
+	"An omitted plugin or component is a wildcard; an unknown config key is rejected rather than ignored, so a typo cannot silently widen a selection.",
+}
+
 // workflowSteps is the safe operating order. The confirm step is deliberate:
 // plan and status are read-only, but sync changes the filesystem, so an agent
 // must get the user's agreement before running it.
@@ -57,6 +68,8 @@ const (
 	txtRow2        = "  %s\t%s\n" // name, value (tabwriter-aligned)
 	txtConfigHdr   = "\nCONFIG  (%s)\n"
 	txtConfigRow   = "  %s\n"
+	txtScopeHdr    = "\nSCOPE  (user scope only; selections fan out)"
+	txtScopeRow    = "  - %s\n"
 	txtWorkflowHdr = "\nWORKFLOW  (run in this order; sync only after the user agrees)"
 	txtWorkflowRow = "  %d. %s\n     %s\n" // n, command, detail
 	txtCommandsHdr = "\nCOMMANDS"
@@ -74,6 +87,8 @@ const (
 	mdModelHdr     = "\n## Model\n\n"
 	mdModelRow     = "- **%s**: %s\n"
 	mdConfig       = "\n## Config\n\nPath: `%s`\n\n```toml\n%s\n```\n" // path, example
+	mdScopeHdr     = "\n## Scope\n\n"
+	mdScopeRow     = "- %s\n"
 	mdWorkflowHdr  = "\n## Workflow\n\nRun in this order; only run `sync` after the user agrees.\n\n"
 	mdWorkflowRow  = "%d. **%s**: %s\n"
 	mdCommandsHdr  = "\n## Commands\n\n"

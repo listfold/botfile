@@ -27,7 +27,8 @@ import (
 
 // SchemaVersion is the JSON guide's contract version, bumped when the shape
 // changes, so an agent can parse it stably (as the output report does).
-const SchemaVersion = 1
+// 2 added the scope section (user scope only, fan-out, selection depth).
+const SchemaVersion = 2
 
 // CommandDoc is one CLI verb as the guide presents it. The cli builds these
 // from its canonical command table and passes them in, so the guide cannot
@@ -67,6 +68,7 @@ type Guide struct {
 	Model         []Term       `json:"model"`
 	ConfigPath    string       `json:"configPath"`
 	ConfigExample string       `json:"configExample"`
+	Scope         []string     `json:"scope"`
 	Workflow      []Step       `json:"workflow"`
 	Commands      []CommandDoc `json:"commands"`
 	Agents        []AgentDoc   `json:"agents"`
@@ -92,6 +94,7 @@ func Build(configPath, home string, getenv func(string) string, commands []Comma
 		Model:         modelTerms,
 		ConfigPath:    configPath,
 		ConfigExample: minimalConfig,
+		Scope:         scopeNotes,
 		Workflow:      workflowSteps,
 		Commands:      commands,
 		Agents:        agentDocs(home, getenv),
@@ -177,6 +180,11 @@ func RenderText(w io.Writer, g Guide) {
 		fmt.Fprintf(w, txtConfigRow, line)
 	}
 
+	fmt.Fprintln(w, txtScopeHdr)
+	for _, line := range g.Scope {
+		fmt.Fprintf(w, txtScopeRow, line)
+	}
+
 	fmt.Fprintln(w, txtWorkflowHdr)
 	for i, s := range g.Workflow {
 		fmt.Fprintf(w, txtWorkflowRow, i+1, s.Command, s.Detail)
@@ -215,6 +223,11 @@ func RenderMarkdown(w io.Writer, g Guide) {
 	}
 
 	fmt.Fprintf(w, mdConfig, g.ConfigPath, g.ConfigExample)
+
+	fmt.Fprint(w, mdScopeHdr)
+	for _, line := range g.Scope {
+		fmt.Fprintf(w, mdScopeRow, line)
+	}
 
 	fmt.Fprint(w, mdWorkflowHdr)
 	for i, s := range g.Workflow {

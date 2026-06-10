@@ -119,12 +119,18 @@ func displayConfigPath() string {
 }
 
 // commandDocs adapts the canonical command table into guide command docs, so the
-// guide's command list cannot drift from what the parser actually accepts.
+// guide's command list cannot drift from what the parser actually accepts. The
+// meta verbs dispatched before the contract (guide, version) are appended here,
+// the one place they are documented, so the guide describes its own entry point.
 func commandDocs() []guide.CommandDoc {
-	docs := make([]guide.CommandDoc, 0, len(commands))
+	docs := make([]guide.CommandDoc, 0, len(commands)+2)
 	for _, c := range commands {
 		docs = append(docs, guide.CommandDoc{Name: c.Name, Summary: c.Summary, Usage: invocationLine(c)})
 	}
+	docs = append(docs,
+		guide.CommandDoc{Name: "guide", Summary: "print this guide (text, markdown, or json)", Usage: "botfile guide"},
+		guide.CommandDoc{Name: "version", Summary: "print the version", Usage: "botfile version"},
+	)
 	return docs
 }
 

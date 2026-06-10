@@ -42,6 +42,18 @@ func TestBuildHasModelTermsAndWorkflowOrder(t *testing.T) {
 		}
 	}
 
+	// Scope must state the user-scope boundary, the kind difference, and the
+	// selection hierarchy, the three facts an agent needs before selecting.
+	if len(g.Scope) == 0 {
+		t.Fatal("guide has no scope notes")
+	}
+	scope := strings.Join(g.Scope, " ")
+	for _, want := range []string{"user scope", "fan out", "skill is invoked", "ambient", "source > plugin > component", "wildcard"} {
+		if !strings.Contains(scope, want) {
+			t.Errorf("scope notes missing %q", want)
+		}
+	}
+
 	// The safe order must put the read-only steps and the confirm gate before
 	// sync, and adopt last.
 	order := make([]string, len(g.Workflow))
@@ -142,6 +154,7 @@ func TestRenderTextHasAllSections(t *testing.T) {
 	for _, want := range []string{
 		"botfile:", "MODEL", "source", "selection",
 		"CONFIG", "/home/u/.config/botfile/config.toml", "[[sources]]", "agents = [\"claude-code\"]",
+		"SCOPE", "user scope",
 		"WORKFLOW", "botfile status", "botfile plan", "botfile sync", "botfile adopt",
 		"COMMANDS", "AGENTS", "claude-code", "~/.claude/skills/<name>/",
 		"JSON", "--format json",
@@ -160,6 +173,7 @@ func TestRenderMarkdownStructure(t *testing.T) {
 
 	for _, want := range []string{
 		"# botfile", "## Model", "- **source**:", "## Config", "```toml",
+		"## Scope", "user scope",
 		"## Workflow", "## Commands", "| Command | Does |", "## Agents",
 		"| Agent | Skills | Instructions |", "`claude-code`", "## JSON for agents",
 	} {
@@ -184,6 +198,9 @@ func TestRenderJSONRoundTrips(t *testing.T) {
 	}
 	if len(g.Model) != 4 {
 		t.Errorf("model terms = %d, want 4", len(g.Model))
+	}
+	if len(g.Scope) == 0 {
+		t.Error("scope notes missing from JSON guide")
 	}
 	if len(g.Agents) != len(core.KnownAgents) {
 		t.Errorf("agents = %d, want %d", len(g.Agents), len(core.KnownAgents))
