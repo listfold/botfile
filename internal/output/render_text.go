@@ -41,7 +41,7 @@ func renderNotesText(w io.Writer, notes []Note) {
 	for _, n := range notes {
 		switch n.Kind {
 		case "notice":
-			fmt.Fprintf(w, lineNotice, n.Selected, n.AlsoReaches, n.Namespace)
+			fmt.Fprintf(w, lineNotice, n.Selected, n.AlsoReaches, n.Namespace, n.Selection)
 		case "shadowed":
 			fmt.Fprintf(w, lineShadowed, n.Target, n.Source, n.WonBy)
 		case "skipped":

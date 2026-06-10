@@ -69,6 +69,7 @@ type Note struct {
 	Selected    []string `json:"selected,omitempty"`    // notice
 	AlsoReaches []string `json:"alsoReaches,omitempty"` // notice
 	Namespace   string   `json:"namespace,omitempty"`   // notice
+	Selection   string   `json:"selection,omitempty"`   // notice: the selection that caused it
 
 	Target string `json:"target,omitempty"` // shadowed
 	Source string `json:"source,omitempty"` // shadowed
@@ -232,6 +233,7 @@ func notesFrom(m runtime.Model) []Note {
 		out = append(out, Note{
 			Kind: "notice", Selected: agentStrings(n.Selected),
 			AlsoReaches: agentStrings(n.AlsoReaches), Namespace: n.Namespace,
+			Selection: selectionRef(n.SourceName, n.PluginName, n.ComponentID),
 		})
 	}
 	for _, s := range m.Plan.Shadows {
@@ -244,6 +246,26 @@ func notesFrom(m runtime.Model) []Note {
 		out = append(out, Note{Kind: "skipped", Component: p.Component, Agent: string(p.Agent), Detail: p.Detail})
 	}
 	return out
+}
+
+// selectionRef renders the selection that produced a notice as a compact
+// source[/plugin[/component]] path, omitting wildcard selectors. Two notices
+// can otherwise render identically (same agents, same namespace) when two
+// selections scope skills to the same shared-pool subset; the ref keeps them
+// distinguishable and points the user at the selection to edit.
+func selectionRef(source, plugin, component string) string {
+	hasPlugin := plugin != "" && plugin != "*"
+	hasComponent := component != "" && component != "*"
+	switch {
+	case hasPlugin && hasComponent:
+		return source + "/" + plugin + "/" + component
+	case hasComponent:
+		return source + "/*/" + component
+	case hasPlugin:
+		return source + "/" + plugin
+	default:
+		return source
+	}
 }
 
 func adoptFrom(m runtime.Model) *AdoptDTO {

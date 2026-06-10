@@ -150,12 +150,31 @@ func TestRenderTextNoticeParity(t *testing.T) {
 		Projection: project.Result{Notices: []project.Notice{{
 			Kind: project.NoticeSharedSkillNamespace, Selected: []core.AgentID{"codex-cli"},
 			AlsoReaches: []core.AgentID{"opencode", "copilot-cli"}, Namespace: "/h/.agents/skills",
+			SourceName: "personal", PluginName: "*", ComponentID: "*",
 		}}},
 	}
 	var buf bytes.Buffer
 	RenderText(&buf, ReportFromModel(m))
-	want := fmt.Sprintf(lineNotice, []string{"codex-cli"}, []string{"opencode", "copilot-cli"}, "/h/.agents/skills")
+	want := fmt.Sprintf(lineNotice, []string{"codex-cli"}, []string{"opencode", "copilot-cli"}, "/h/.agents/skills", "personal")
 	if !strings.Contains(buf.String(), want) {
 		t.Fatalf("notice line missing\n got: %q\nwant substring: %q", buf.String(), want)
+	}
+}
+
+// TestSelectionRef pins the compact selection path: wildcard selectors are
+// omitted, except a wildcard plugin above a named component, which stays
+// explicit so the ref cannot read as a plugin named like the component kind.
+func TestSelectionRef(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ source, plugin, component, want string }{
+		{"personal", "*", "*", "personal"},
+		{"botfile", "standards", "*", "botfile/standards"},
+		{"botfile", "standards", "skill/review", "botfile/standards/skill/review"},
+		{"personal", "*", "skill/review", "personal/*/skill/review"},
+	}
+	for _, c := range cases {
+		if got := selectionRef(c.source, c.plugin, c.component); got != c.want {
+			t.Errorf("selectionRef(%q, %q, %q) = %q, want %q", c.source, c.plugin, c.component, got, c.want)
+		}
 	}
 }
