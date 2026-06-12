@@ -217,6 +217,27 @@ func TestScanHiddenComponentEntriesAreProblems(t *testing.T) {
 	}
 }
 
+func TestScanFurnitureUnderKindDirIsIgnored(t *testing.T) {
+	t.Parallel()
+	// The well-known housekeeping files never mean a component was intended,
+	// so a fresh source with .gitkeep placeholders scans clean.
+	fsys := fstest.MapFS{
+		"p/skills/.gitkeep":        file(""),
+		"p/instructions/.gitkeep":  file(""),
+		"p/commands/.keep":         file(""),
+		"p/commands/.gitignore":    file("*.tmp"),
+		"p/instructions/.DS_Store": file("finder droppings"),
+		"p/commands/release.md":    file("a real command"),
+	}
+	res := Scan(fsys)
+	if len(res.Problems) != 0 {
+		t.Fatalf("furniture must not be a problem, got %+v", res.Problems)
+	}
+	if got := componentNames(res); len(got) != 1 || got[0] != "command/release" {
+		t.Fatalf("components = %v, want [command/release]", got)
+	}
+}
+
 func TestLayoutRoundTrip(t *testing.T) {
 	t.Parallel()
 	if d, ok := DirForKind(core.KindSkill); !ok || d != "skills" {

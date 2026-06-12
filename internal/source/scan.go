@@ -163,8 +163,13 @@ func scanKind(fsys fs.FS, pluginName, kindDir string, kind core.Kind, plugin *co
 	for _, e := range entries {
 		// Inside a kind directory every entry is a component candidate, so a
 		// hidden entry is reported rather than silently skipped (the dotfile
-		// furniture exception applies only at the source and plugin levels).
+		// furniture exception applies only at the source and plugin levels),
+		// except the well-known housekeeping names that never mean a component
+		// was intended.
 		if isHidden(e.Name()) {
+			if isFurniture(e.Name()) {
+				continue
+			}
 			res.Problems = append(res.Problems, Problem{
 				Kind: ProblemHiddenComponent, Path: path.Join(base, e.Name()),
 				Detail: "a hidden entry under a kind directory is not a valid component",
@@ -241,6 +246,20 @@ func scanMarkdownComponent(base string, e fs.DirEntry, kind core.Kind, plugin *c
 // ignores at every level (.git, .gitignore, .DS_Store, and so on).
 func isHidden(name string) bool {
 	return len(name) > 0 && name[0] == '.'
+}
+
+// isFurniture reports the well-known housekeeping files that may sit inside a
+// kind directory without meaning a component was intended: keep-the-empty-dir
+// markers and OS/VCS droppings. These are silently ignored even there, so a
+// fresh source with `.gitkeep` placeholders scans clean; any other hidden
+// entry under a kind directory is still reported (a mistyped component must
+// not vanish silently).
+func isFurniture(name string) bool {
+	switch name {
+	case ".gitkeep", ".keep", ".gitignore", ".DS_Store":
+		return true
+	}
+	return false
 }
 
 // sortResult orders plugins, their components, and problems deterministically so
