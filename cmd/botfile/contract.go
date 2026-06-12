@@ -203,7 +203,7 @@ func usage(w io.Writer) {
 		}
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "also: botfile version, botfile help, botfile guide (agent-oriented; --format text|markdown|json)")
+	fmt.Fprintln(w, "also: botfile version, botfile upgrade [--check], botfile help, botfile guide (agent-oriented; --format text|markdown|json)")
 }
 
 // invocationLine renders a command's calling form, for example

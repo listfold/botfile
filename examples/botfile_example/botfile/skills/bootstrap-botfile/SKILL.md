@@ -58,6 +58,7 @@ Run in this order; only run `sync` after the user agrees.
 | `botfile adopt <path> --into <source>/<plugin>` | bring an agent-created component under management |
 | `botfile guide` | print this guide (text, markdown, or json) |
 | `botfile version` | print the version |
+| `botfile upgrade [--check]` | replace this binary with the latest release, checksum-verified (--check: report only) |
 
 ## Agents
 
@@ -76,4 +77,4 @@ Run in this order; only run `sync` after the user agrees.
 - Every command accepts --format json. Prefer it: parse the structured report rather than scraping text.
 - The JSON envelope carries schemaVersion, command, phase, outcome, exitCode, plus ops, notes, issues, and summary counts.
 - exitCode is authoritative: 0 ok, 1 blocked (a conflict or broken config refused the change), 2 a usage or effect error.
-- plan and status never modify anything; only sync and adopt change the filesystem.
+- plan and status never modify anything; only sync and adopt change the filesystem, and upgrade replaces botfile's own binary (checksum-verified, never in the background).

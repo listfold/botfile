@@ -130,6 +130,7 @@ func commandDocs() []guide.CommandDoc {
 	docs = append(docs,
 		guide.CommandDoc{Name: "guide", Summary: "print this guide (text, markdown, or json)", Usage: "botfile guide"},
 		guide.CommandDoc{Name: "version", Summary: "print the version", Usage: "botfile version"},
+		guide.CommandDoc{Name: "upgrade", Summary: "replace this binary with the latest release, checksum-verified (--check: report only)", Usage: "botfile upgrade [--check]"},
 	)
 	return docs
 }
@@ -153,6 +154,8 @@ func run(args []string) int {
 	case "--version", "version":
 		fmt.Fprintln(os.Stdout, versionLine())
 		return 0
+	case "upgrade":
+		return upgradeCmd(os.Stdout, args[1:], osUpgradeDeps())
 	}
 	inv, err := parse(args)
 	if err != nil {
