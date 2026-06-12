@@ -85,7 +85,7 @@ func TestUpgradeCheckJSON(t *testing.T) {
 		t.Fatalf("check json: %v\n%s", err, buf.String())
 	}
 	if r.Command != "upgrade" || r.Phase != "done" || r.Outcome != "ok" ||
-		r.Current != "v0.1.0" || r.Latest != "v0.2.0" || r.UpToDate || !r.Comparable || r.Applied || r.ExitCode != 0 {
+		r.Current != "v0.1.0" || r.Latest != "v0.2.0" || r.UpToDate || !r.ReleaseBuild || r.Applied || r.ExitCode != 0 {
 		t.Errorf("report = %+v, want a clean newer-available check", r)
 	}
 }
@@ -119,7 +119,7 @@ func TestUpgradeRefusesNonReleaseBuild(t *testing.T) {
 	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
 		t.Fatalf("blocked json: %v\n%s", err, buf.String())
 	}
-	if r.Outcome != "blocked" || r.ExitCode != 1 || r.Comparable || r.Applied {
+	if r.Phase != "blocked" || r.Outcome != "blocked" || r.ExitCode != 1 || r.ReleaseBuild || r.Applied {
 		t.Errorf("report = %+v, want a blocked non-release apply", r)
 	}
 	if !strings.Contains(r.Detail, "not a release build") {
@@ -194,7 +194,7 @@ func TestUpgradeAppliedJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
 		t.Fatalf("applied json: %v\n%s", err, buf.String())
 	}
-	if r.Outcome != "ok" || !r.Applied || r.ExitCode != 0 {
+	if r.Phase != "done" || r.Outcome != "ok" || !r.Applied || r.ExitCode != 0 {
 		t.Errorf("report = %+v, want an applied ok run", r)
 	}
 }
@@ -269,7 +269,7 @@ func TestUpgradeChecksumMismatchKeepsBinary(t *testing.T) {
 	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
 		t.Fatalf("mismatch json: %v\n%s", err, buf.String())
 	}
-	if r.Outcome != "failed" || r.ExitCode != 2 || !strings.Contains(r.Detail, "checksum mismatch") {
+	if r.Phase != "failed" || r.Outcome != "failed" || r.ExitCode != 2 || !strings.Contains(r.Detail, "checksum mismatch") {
 		t.Errorf("report = %+v, want a failed checksum-mismatch run", r)
 	}
 	if got, _ := os.ReadFile(exe); string(got) != "old" {
@@ -304,8 +304,32 @@ func TestUpgradeNetworkFailureJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
 		t.Fatalf("failure json: %v\n%s", err, buf.String())
 	}
-	if r.Outcome != "failed" || r.ExitCode != 2 || !strings.Contains(r.Detail, "no route to host") {
+	if r.Phase != "failed" || r.Outcome != "failed" || r.ExitCode != 2 || !strings.Contains(r.Detail, "no route to host") {
 		t.Errorf("report = %+v, want a failed network run", r)
+	}
+	// A failure before any comparison must not smear the binary's own nature:
+	// this is a release build, and the report still says so.
+	if !r.ReleaseBuild {
+		t.Errorf("report = %+v, want releaseBuild true for a v0.1.0 binary despite the failure", r)
+	}
+}
+
+// TestUpgradeUnparseableLatestTag pins the release-build-but-weird-tag case:
+// the anomaly is the published tag, not this binary, so the run fails rather
+// than claiming a non-release build.
+func TestUpgradeUnparseableLatestTag(t *testing.T) {
+	withVersion(t, "v0.1.0")
+	m := map[string][]byte{releaseAPI: []byte(`{"tag_name": "nightly"}`)}
+	var buf strings.Builder
+	if code := upgradeCmd(&buf, []string{"--format", "json"}, testDeps(m, "/nonexistent")); code != 2 {
+		t.Fatalf("weird-tag exit = %d, want 2", code)
+	}
+	var r upgradeReport
+	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
+		t.Fatalf("weird-tag json: %v\n%s", err, buf.String())
+	}
+	if r.Phase != "failed" || r.Outcome != "failed" || !r.ReleaseBuild || !strings.Contains(r.Detail, "cannot compare") {
+		t.Errorf("report = %+v, want a failed cannot-compare run on a release build", r)
 	}
 }
 

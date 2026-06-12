@@ -57,7 +57,7 @@ type upgradeReport struct {
 	Current       string `json:"current"`
 	Latest        string `json:"latest,omitempty"`
 	UpToDate      bool   `json:"upToDate"`
-	Comparable    bool   `json:"comparable"` // false for a non-release (source/dev) build
+	ReleaseBuild  bool   `json:"releaseBuild"` // whether this binary is a stamped vX.Y.Z release (a dev/source build refuses to self-replace)
 	Applied       bool   `json:"applied"`
 	Detail        string `json:"detail,omitempty"`
 	ExitCode      int    `json:"exitCode"`
@@ -95,7 +95,7 @@ func upgradeCmd(w io.Writer, rest []string, deps upgradeDeps) int {
 		fmt.Fprintf(w, "upgraded botfile %s -> %s\n", r.Current, r.Latest)
 	case r.UpToDate:
 		fmt.Fprintf(w, "botfile %s is the latest release\n", r.Current)
-	case !r.Comparable:
+	case !r.ReleaseBuild:
 		fmt.Fprintf(w, "botfile %s is not a release build; the latest release is %s\n%s\n", r.Current, r.Latest, r.Detail)
 	default:
 		fmt.Fprintf(w, "botfile %s -> %s is available; run `botfile upgrade` to apply\n", r.Current, r.Latest)
@@ -106,9 +106,9 @@ func upgradeCmd(w io.Writer, rest []string, deps upgradeDeps) int {
 // runUpgrade classifies the whole run into one report: resolve, compare, and
 // (unless checkOnly) apply.
 func runUpgrade(checkOnly bool, deps upgradeDeps) upgradeReport {
-	r := upgradeReport{SchemaVersion: 1, Command: "upgrade", Phase: "done", Outcome: "ok", Current: version}
+	r := upgradeReport{SchemaVersion: 1, Command: "upgrade", Phase: "done", Outcome: "ok", Current: version, ReleaseBuild: isReleaseTag(version)}
 	fail := func(detail string) upgradeReport {
-		r.Outcome, r.ExitCode, r.Detail = "failed", 2, detail
+		r.Phase, r.Outcome, r.ExitCode, r.Detail = "failed", "failed", 2, detail
 		return r
 	}
 
@@ -123,18 +123,23 @@ func runUpgrade(checkOnly bool, deps upgradeDeps) upgradeReport {
 		return fail("resolve latest release: no tag in the release metadata")
 	}
 	r.Latest = rel.TagName
-	r.UpToDate, r.Comparable = releaseCompare(version, rel.TagName)
+	upToDate, comparable := releaseCompare(version, rel.TagName)
+	r.UpToDate = upToDate
 
 	switch {
 	case r.UpToDate:
 		r.Detail = "already the latest release"
-	case !r.Comparable:
+	case !r.ReleaseBuild:
 		// A "dev" or otherwise non-release build: replacing it could be a
 		// downgrade, and a source build's owner upgrades at the source.
 		r.Detail = "not a release build; upgrade via `go install ./cmd/botfile` from your checkout, or install the release: " + installerHint
 		if !checkOnly {
-			r.Outcome, r.ExitCode = "blocked", 1
+			r.Phase, r.Outcome, r.ExitCode = "blocked", "blocked", 1
 		}
+	case !comparable:
+		// This binary is a release, so the anomaly is on the other side: the
+		// published tag does not parse as a release version.
+		return fail("latest release tag " + rel.TagName + " is not a vX.Y.Z release; cannot compare")
 	case checkOnly:
 		r.Detail = "newer release available; run `botfile upgrade` to apply"
 	default:
@@ -298,6 +303,12 @@ func releaseCompare(current, latest string) (upToDate, comparable bool) {
 		}
 	}
 	return true, true
+}
+
+// isReleaseTag reports whether v is a stamped vX.Y.Z release version.
+func isReleaseTag(v string) bool {
+	_, ok := parseRelease(v)
+	return ok
 }
 
 // parseRelease parses a vX.Y.Z release tag into its three numbers.
