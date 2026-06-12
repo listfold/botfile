@@ -127,6 +127,25 @@ func TestUpgradeRefusesNonReleaseBuild(t *testing.T) {
 	}
 }
 
+// TestUpgradeEqualMalformedTags pins the equality-bypass case: a dev build
+// meeting a mispublished "dev" tag is a blocked non-release run, never
+// "already the latest release".
+func TestUpgradeEqualMalformedTags(t *testing.T) {
+	withVersion(t, "dev")
+	m := map[string][]byte{releaseAPI: []byte(`{"tag_name": "dev"}`)}
+	var buf strings.Builder
+	if code := upgradeCmd(&buf, []string{"--format", "json"}, testDeps(m, "/nonexistent")); code != 1 {
+		t.Fatalf("equal-malformed apply exit = %d, want 1 (blocked)", code)
+	}
+	var r upgradeReport
+	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
+		t.Fatalf("json: %v\n%s", err, buf.String())
+	}
+	if r.Outcome != "blocked" || r.UpToDate || r.ReleaseBuild {
+		t.Errorf("report = %+v, want blocked, not up to date, not a release build", r)
+	}
+}
+
 // TestDefaultVersionIsNotARelease pins finding-2's invariant: a plain
 // `go install ./cmd/botfile` build (no ldflags) must identify as a
 // non-release, so upgrade refuses to replace it.
@@ -374,8 +393,13 @@ func TestReleaseCompare(t *testing.T) {
 		{"v0.2.0", "v0.1.9", true, true},
 		{"v1.0.0", "v0.9.9", true, true},
 		{"dev", "v0.2.0", false, false},
+		{"dev", "dev", false, false}, // equal malformed values stay non-comparable
 		{"v0.1", "v0.2.0", false, false},
 		{"0.1.0", "v0.2.0", false, false},
+		{"v-1.0.0", "v0.2.0", false, false}, // signed components are not releases
+		{"v+1.2.3", "v0.2.0", false, false},
+		{"v1.2.x", "v0.2.0", false, false},
+		{"v01.2.3", "v01.2.3", true, true}, // leading zeros still digits-only
 	}
 	for _, c := range cases {
 		upToDate, comparable := releaseCompare(c.current, c.latest)

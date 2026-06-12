@@ -289,9 +289,9 @@ func checksumFor(sums, asset string) (string, bool) {
 // comparable, so the caller can word the outcome honestly rather than urge
 // what might be a downgrade.
 func releaseCompare(current, latest string) (upToDate, comparable bool) {
-	if current == latest {
-		return true, true
-	}
+	// Parse before any equality shortcut: two equal malformed values (a "dev"
+	// build against a mispublished "dev" tag, say) must stay non-comparable,
+	// not report a dev build as the latest release.
 	cur, okC := parseRelease(current)
 	lat, okL := parseRelease(latest)
 	if !okC || !okL {
@@ -320,13 +320,28 @@ func parseRelease(v string) ([3]int, bool) {
 		return out, false
 	}
 	for i, p := range parts {
+		// Digits only: Atoi alone would accept signed components ("v-1.0.0",
+		// "v+1.2.3"), weakening the release-build predicate.
+		if p == "" || !isDigits(p) {
+			return out, false
+		}
 		n, err := strconv.Atoi(p)
-		if err != nil || p == "" {
+		if err != nil {
 			return out, false
 		}
 		out[i] = n
 	}
 	return out, true
+}
+
+// isDigits reports whether s is entirely ASCII digits.
+func isDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // osUpgradeDeps wires the real boundary: bounded HTTP, the process's own
