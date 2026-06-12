@@ -7,7 +7,7 @@ package guide
 // here, so the human and machine forms cannot drift on wording.
 
 // Tagline is botfile's one-line description, the guide's opening line.
-const Tagline = "botfile manages AI-agent skills and instructions as symlinks from source repositories you control."
+const Tagline = "botfile manages AI-agent skills, instructions, and commands as symlinks from source repositories you control."
 
 // minimalConfig is the smallest config.toml that does something: one source,
 // one selection for one agent. Shown verbatim in every format.
@@ -23,17 +23,17 @@ agents = ["claude-code"]`
 var modelTerms = []Term{
 	{"source", "A local directory, often a git checkout, holding curated components. botfile reads it in place; git does any fetching."},
 	{"plugin", "A named bundle inside a source. Even a single-bundle source has an explicit plugin directory: <source>/<plugin>/."},
-	{"component", "A typed artifact under a plugin. Kinds today: a skill (a directory with a SKILL.md) and an instruction (a .md file)."},
+	{"component", "A typed artifact under a plugin. Kinds today: a skill (a directory with a SKILL.md), an instruction (a .md file), and a command (a .md file the agent exposes as a slash command)."},
 	{"selection", "A config rule mapping a source (and optionally one plugin or component) to one or more agents that should receive it."},
 }
 
 // scopeNotes states botfile's reach: user scope only, fan-out across agents,
-// why the two kinds need different scoping care, and selections that narrow to
+// why the kinds need different scoping care, and selections that narrow to
 // any depth of source > plugin > component.
 var scopeNotes = []string{
 	"botfile operates at user scope only: the per-user paths under your home directory. It never writes into a project checkout (a repo's .claude/ or an in-repo AGENTS.md); project-scoped components belong to the project.",
 	"Selections fan out: one component reaches every agent its selections name, one symlink per agent's native path, and agents reading the shared ~/.agents/skills pool are served by a single link. Symlinks, not copies, so an edit to the source is live through every agent at once.",
-	"The two kinds differ in reach: a skill is invoked at runtime when relevant, so scoping skills to a subset of agents is rarely critical; an instruction is ambient guidance the agent harness injects into every session, so it matters that instructions can be scoped to all, some, or one agent.",
+	"The kinds differ in invocation, which drives scoping care: an instruction is ambient (the harness injects it into every session), so it matters that instructions can be scoped to all, some, or one agent; a skill is model-invoked when relevant and a command is user-invoked (a slash command), so both cost nothing until used and scoping them tightly is rarely critical. Not every agent supports commands; the agents table shows a dash where a kind has no native surface.",
 	"A selection picks any depth of source > plugin > component: omit plugin and component for the whole source, set plugin for one bundle, set both for a single component (component is <kind>/<name>, like skill/review).",
 	"An omitted plugin or component is a wildcard; an unknown config key is rejected rather than ignored, so a typo cannot silently widen a selection.",
 }
@@ -74,8 +74,8 @@ const (
 	txtWorkflowRow = "  %d. %s\n     %s\n" // n, command, detail
 	txtCommandsHdr = "\nCOMMANDS"
 	txtAgentsHdr   = "\nAGENTS  (where each kind installs)"
-	txtAgentsHead  = "  agent\tskills\tinstructions"
-	txtRow3        = "  %s\t%s\t%s\n" // id, skills, instructions
+	txtAgentsHead  = "  agent\tskills\tinstructions\tcommands"
+	txtRow4        = "  %s\t%s\t%s\t%s\n" // id, skills, instructions, commands
 	txtJSONHdr     = "\nJSON  (for agents)"
 	txtJSONRow     = "  - %s\n"
 )
@@ -95,8 +95,8 @@ const (
 	mdCommandsHead = "| Command | Does |\n|---|---|\n"
 	mdCommandRow   = "| `%s` | %s |\n"
 	mdAgentsHdr    = "\n## Agents\n\n"
-	mdAgentsHead   = "| Agent | Skills | Instructions |\n|---|---|---|\n"
-	mdAgentRow     = "| `%s` | `%s` | `%s` |\n"
+	mdAgentsHead   = "| Agent | Skills | Instructions | Commands |\n|---|---|---|---|\n"
+	mdAgentRow     = "| `%s` | `%s` | `%s` | `%s` |\n"
 	mdJSONHdr      = "\n## JSON for agents\n\n"
 	mdJSONRow      = "- %s\n"
 )

@@ -11,9 +11,10 @@ const (
 	lineOp       = "  %-8s %s -> %s\n" // kind, target, dest
 
 	// Non-blocking notes.
-	lineNotice   = "  note     skills for %v also reach %v via %s (selection %s)\n" // selected, alsoReaches, namespace, selection
-	lineShadowed = "  shadowed %s: %s overridden by %s\n"                           // target, source, wonBy
-	lineSkipped  = "  skipped  %s on %s (%s)\n"                                     // component, agent, detail
+	lineNotice          = "  note     skills for %v also reach %v via %s (selection %s)\n" // selected, alsoReaches, namespace, selection
+	lineShadowed        = "  shadowed %s: %s overridden by %s\n"                           // target, source, wonBy
+	lineShadowedCommand = "  shadowed %s on %s: %s\n"                                      // component, agent, detail
+	lineSkipped         = "  skipped  %s on %s (%s)\n"                                     // component, agent, detail
 
 	// Blocking issues.
 	lineIssue = "  ! %-18s %s: %s\n" // kind, ref, detail

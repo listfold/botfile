@@ -86,6 +86,11 @@ const (
 	// see the skills. Reported so a scope botfile cannot enforce never lies
 	// silently (manifesto 49).
 	NoticeSharedSkillNamespace NoticeKind = iota
+	// NoticeShadowedCommand: a command and a component of the kind the agent
+	// itself resolves over it (claude-code: a skill) install under the same
+	// name, so the agent will never surface the command. Both links are still
+	// created; the agent's own precedence is reported, not enforced.
+	NoticeShadowedCommand
 )
 
 // String renders a NoticeKind as a stable, human-readable token.
@@ -93,23 +98,27 @@ func (k NoticeKind) String() string {
 	switch k {
 	case NoticeSharedSkillNamespace:
 		return "shared-skill-namespace"
+	case NoticeShadowedCommand:
+		return "shadowed-command"
 	default:
 		return "unknown-notice"
 	}
 }
 
 // Notice is a non-blocking projection outcome: the install happens, but its
-// effect is broader than the selection literally named, and the user is told so.
-// It carries the selection's selectors (PluginName, ComponentID) so a consumer
-// can point the user at the exact selection that caused the broader reach, and
-// can tell two notices apart without relying on slice position.
+// effect differs from what the selections literally named, and the user is told
+// so. A shared-namespace notice carries the selection's selectors (PluginName,
+// ComponentID) so a consumer can point the user at the exact selection that
+// caused the broader reach; a shadowed-command notice carries the shadowed
+// component in ComponentID and the affected agent in Selected (it can arise
+// from two different selections, so no single selection owns it).
 type Notice struct {
 	Kind        NoticeKind
 	SourceName  string
 	PluginName  string         // the selection's plugin selector ("*" for all)
-	ComponentID string         // the selection's component selector ("*" for all)
+	ComponentID string         // the selection's component selector, or the shadowed component
 	Namespace   string         // the shared directory the skills install into
-	Selected    []core.AgentID // agents the selection named that share this namespace
+	Selected    []core.AgentID // agents the selection named that share this namespace, or the shadowed agent
 	AlsoReaches []core.AgentID // other agents that read the namespace and will also see the skills
 	Detail      string
 }
@@ -138,6 +147,12 @@ func Project(cfg core.Config, sources []Source, agents agent.Set, roots agent.Ro
 	// selection that scopes skills to a subset of a shared directory can be
 	// flagged (manifesto 49).
 	skillNS := skillNamespaces(agents, roots)
+
+	// installed records every (agent, kind, name) that produced a link, with
+	// the source it came from, so agent-side precedence between kinds can be
+	// flagged after all selections are joined (a shadowing pair can come from
+	// two selections or two sources).
+	installed := make(map[core.AgentID]map[core.Kind]map[string]string)
 
 	var res Result
 	for _, sel := range cfg.Selections {
@@ -202,6 +217,13 @@ func Project(cfg core.Config, sources []Source, agents agent.Set, roots agent.Ro
 					Dest:       dest,
 					SourceName: src.Name,
 				})
+				if installed[agentID] == nil {
+					installed[agentID] = make(map[core.Kind]map[string]string)
+				}
+				if installed[agentID][m.comp.Kind] == nil {
+					installed[agentID][m.comp.Kind] = make(map[string]string)
+				}
+				installed[agentID][m.comp.Kind][m.comp.Name] = src.Name
 			}
 		}
 
@@ -213,8 +235,48 @@ func Project(cfg core.Config, sources []Source, agents agent.Set, roots agent.Ro
 		}
 	}
 
+	res.Notices = append(res.Notices, shadowNotices(agents, installed)...)
+
 	sortResult(&res)
 	return res
+}
+
+// shadowNotices flags every same-name pair where the agent itself resolves one
+// kind over another (claude-code: skill x shadows command x as /x), so a
+// managed component the agent will never surface does not pass silently. Both
+// links install; the notice reports the agent's documented precedence.
+func shadowNotices(agents agent.Set, installed map[core.AgentID]map[core.Kind]map[string]string) []Notice {
+	var notices []Notice
+	for agentID, byKind := range installed {
+		ag, ok := agents.Lookup(agentID)
+		if !ok {
+			continue
+		}
+		for kind, names := range byKind {
+			winner, ok := ag.ShadowedBy(kind)
+			if !ok {
+				continue
+			}
+			for name, sourceName := range names {
+				if _, clash := byKind[winner][name]; !clash {
+					continue
+				}
+				notices = append(notices, Notice{
+					Kind: NoticeShadowedCommand, SourceName: sourceName,
+					ComponentID: string(kind) + "/" + name,
+					Selected:    []core.AgentID{agentID},
+					Detail:      "a same-name " + string(winner) + " takes precedence in this agent, leaving the " + string(kind) + " unreachable",
+				})
+			}
+		}
+	}
+	sort.Slice(notices, func(i, j int) bool {
+		if notices[i].ComponentID != notices[j].ComponentID {
+			return notices[i].ComponentID < notices[j].ComponentID
+		}
+		return notices[i].Selected[0] < notices[j].Selected[0]
+	})
+	return notices
 }
 
 // skillNamespaces maps each agent that supports skills to its skill directory.

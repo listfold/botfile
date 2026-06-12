@@ -59,6 +59,53 @@ func TestProjectWildcardToClaudeCode(t *testing.T) {
 	}
 }
 
+func TestProjectShadowedCommandNotice(t *testing.T) {
+	t.Parallel()
+	// A skill and a command sharing one name, even via two selections: claude
+	// itself resolves /go-style to the skill, so the command is flagged. Both
+	// links still install.
+	src := Source{
+		Name: "team",
+		Root: "/src/team",
+		Plugins: []core.Plugin{{
+			Name: "coding",
+			Components: []core.Component{
+				{Kind: core.KindSkill, Name: "go-style"},
+				{Kind: core.KindCommand, Name: "go-style"},
+				{Kind: core.KindCommand, Name: "unshadowed"},
+			},
+		}},
+	}
+	cfg := cfgWith(
+		core.Selection{SourceName: "team", PluginName: "coding", ComponentID: "skill/go-style", Agents: []core.AgentID{core.AgentClaudeCode}},
+		core.Selection{SourceName: "team", PluginName: "coding", ComponentID: "command/go-style", Agents: []core.AgentID{core.AgentClaudeCode, core.AgentOpenCode}},
+		core.Selection{SourceName: "team", PluginName: "coding", ComponentID: "command/unshadowed", Agents: []core.AgentID{core.AgentClaudeCode}},
+	)
+	res := Project(cfg, []Source{src}, agent.Default(), roots())
+
+	if len(res.Problems) != 0 {
+		t.Fatalf("unexpected problems: %+v", res.Problems)
+	}
+	if len(res.Links) != 4 {
+		t.Fatalf("links = %+v, want 4 (both members of the pair still install)", res.Links)
+	}
+	var shadows []Notice
+	for _, n := range res.Notices {
+		if n.Kind == NoticeShadowedCommand {
+			shadows = append(shadows, n)
+		}
+	}
+	// Exactly one: claude-code's go-style pair. opencode has no documented
+	// shadowing, and command/unshadowed has no skill twin.
+	if len(shadows) != 1 {
+		t.Fatalf("shadow notices = %+v, want exactly 1", shadows)
+	}
+	n := shadows[0]
+	if n.ComponentID != "command/go-style" || len(n.Selected) != 1 || n.Selected[0] != core.AgentClaudeCode || n.SourceName != "team" {
+		t.Errorf("notice = %+v, want command/go-style on claude-code from team", n)
+	}
+}
+
 func TestProjectSpecificComponent(t *testing.T) {
 	t.Parallel()
 	cfg := cfgWith(core.Selection{

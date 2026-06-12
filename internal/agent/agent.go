@@ -101,6 +101,13 @@ type InstallRule struct {
 	Shape    LeafShape
 	Ext      string // leaf extension when Shape is LeafFile (for example ".md")
 	Filename string // the fixed leaf name when Shape is LeafFixed (for example "AGENTS.md")
+	// ShadowedBy names a kind whose same-name component takes precedence over
+	// this rule's in the agent itself (claude-code resolves /x to skill x over
+	// command x), so installing both leaves this one unreachable. Zero means no
+	// documented shadowing. The projection reports a notice when a selection
+	// set trips it; botfile still installs both (the agent's resolution is the
+	// agent's, not botfile's, to enforce).
+	ShadowedBy core.Kind
 }
 
 // Spec is the external, validated description of one agent used to build a Set
@@ -244,6 +251,18 @@ func (a Agent) LeafExt(kind core.Kind) (string, bool) {
 	return rule.Ext, true
 }
 
+// ShadowedBy reports the kind whose same-name component the agent itself
+// resolves over kind (claude-code: a skill x shadows command x as /x), if the
+// vendor documents such precedence. It returns false when kind is unsupported
+// or has no documented shadowing.
+func (a Agent) ShadowedBy(kind core.Kind) (core.Kind, bool) {
+	rule, ok := a.rules[kind]
+	if !ok || rule.ShadowedBy == "" {
+		return "", false
+	}
+	return rule.ShadowedBy, true
+}
+
 // Set is a collection of agents keyed by ID: the matrix the projection consumes.
 type Set struct {
 	agents map[core.AgentID]Agent
@@ -370,6 +389,14 @@ func NewAgent(sp Spec) (Agent, error) {
 		default:
 			return Agent{}, fmt.Errorf("agent %q kind %q: invalid leaf shape", sp.ID, kind)
 		}
+		if rule.ShadowedBy != "" {
+			if !core.IsKnownKind(rule.ShadowedBy) {
+				return Agent{}, fmt.Errorf("agent %q kind %q: shadowed-by kind %q is not known", sp.ID, kind, rule.ShadowedBy)
+			}
+			if rule.ShadowedBy == kind {
+				return Agent{}, fmt.Errorf("agent %q kind %q: a kind cannot shadow itself", sp.ID, kind)
+			}
+		}
 		rules[kind] = rule
 	}
 	return Agent{id: sp.ID, base: sp.Base, rules: rules}, nil
@@ -439,9 +466,11 @@ func Default() Set {
 				core.KindInstruction: {Tier: Tier1, Segments: []string{"rules"}, Shape: LeafFile, Ext: ".md"},
 				// claude-code exposes <root>/commands/<name>.md as the /name slash
 				// command: a drop-in directory of one file per command, found by
-				// presence; tier 1 (manifesto 22).
+				// presence; tier 1 (manifesto 22). A same-name skill takes
+				// precedence over a command for /name, so a skill/command name pair
+				// leaves the command unreachable (ShadowedBy).
 				// Source: code.claude.com/docs (slash commands).
-				core.KindCommand: {Tier: Tier1, Segments: []string{"commands"}, Shape: LeafFile, Ext: ".md"},
+				core.KindCommand: {Tier: Tier1, Segments: []string{"commands"}, Shape: LeafFile, Ext: ".md", ShadowedBy: core.KindSkill},
 			},
 		},
 		Spec{
@@ -465,11 +494,11 @@ func Default() Set {
 					Tier: Tier2, Base: &Base{HomeRelative: []string{".codex"}, EnvOverride: "CODEX_HOME"},
 					Shape: LeafFixed, Filename: "AGENTS.md",
 				},
-				// codex exposes ~/.codex/prompts/<name>.md as the /name custom prompt
-				// (CODEX_HOME relocates ~/.codex): a drop-in, one file per command;
-				// tier 1. Upstream has deprecated custom prompts in favor of skills
-				// but still loads them; retire this rule if they are removed.
-				// Source: developers.openai.com/codex/custom-prompts.
+				// codex exposes ~/.codex/prompts/<name>.md as the /prompts:name
+				// custom prompt (CODEX_HOME relocates ~/.codex): a drop-in, one file
+				// per command; tier 1. Upstream has deprecated custom prompts in
+				// favor of skills but still loads them; retire this rule if they are
+				// removed. Source: developers.openai.com/codex/custom-prompts.
 				core.KindCommand: {
 					Tier: Tier1, Base: &Base{HomeRelative: []string{".codex"}, EnvOverride: "CODEX_HOME"},
 					Segments: []string{"prompts"}, Shape: LeafFile, Ext: ".md",

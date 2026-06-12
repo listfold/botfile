@@ -42,6 +42,8 @@ func renderNotesText(w io.Writer, notes []Note) {
 		switch n.Kind {
 		case "notice":
 			fmt.Fprintf(w, lineNotice, n.Selected, n.AlsoReaches, n.Namespace, n.Selection)
+		case "shadowed-command":
+			fmt.Fprintf(w, lineShadowedCommand, n.Component, n.Agent, n.Detail)
 		case "shadowed":
 			fmt.Fprintf(w, lineShadowed, n.Target, n.Source, n.WonBy)
 		case "skipped":

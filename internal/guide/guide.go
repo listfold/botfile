@@ -28,7 +28,8 @@ import (
 // SchemaVersion is the JSON guide's contract version, bumped when the shape
 // changes, so an agent can parse it stably (as the output report does).
 // 2 added the scope section (user scope only, fan-out, selection depth).
-const SchemaVersion = 2
+// 3 added the command kind (agents gain a commands location).
+const SchemaVersion = 3
 
 // CommandDoc is one CLI verb as the guide presents it. The cli builds these
 // from its canonical command table and passes them in, so the guide cannot
@@ -58,6 +59,7 @@ type AgentDoc struct {
 	ID           string `json:"id"`
 	Skills       string `json:"skills,omitempty"`
 	Instructions string `json:"instructions,omitempty"`
+	Commands     string `json:"commands,omitempty"`
 }
 
 // Guide is the whole operator guide as a value: the single source the three
@@ -127,6 +129,11 @@ func agentDocs(home string, getenv func(string) string) []AgentDoc {
 			// placeholder name; a drop-in file uses it (<name>.md).
 			if t, ok := ag.Target(root, core.KindInstruction, "<name>"); ok {
 				d.Instructions = abbreviateHome(t, home)
+			}
+		}
+		if root, ok := roots.For(id, core.KindCommand); ok {
+			if t, ok := ag.Target(root, core.KindCommand, "<name>"); ok {
+				d.Commands = abbreviateHome(t, home)
 			}
 		}
 		docs = append(docs, d)
@@ -201,7 +208,7 @@ func RenderText(w io.Writer, g Guide) {
 	tw = tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, txtAgentsHead)
 	for _, a := range g.Agents {
-		fmt.Fprintf(tw, txtRow3, a.ID, cell(a.Skills), cell(a.Instructions))
+		fmt.Fprintf(tw, txtRow4, a.ID, cell(a.Skills), cell(a.Instructions), cell(a.Commands))
 	}
 	tw.Flush()
 
@@ -243,7 +250,7 @@ func RenderMarkdown(w io.Writer, g Guide) {
 	fmt.Fprint(w, mdAgentsHdr)
 	fmt.Fprint(w, mdAgentsHead)
 	for _, a := range g.Agents {
-		fmt.Fprintf(w, mdAgentRow, a.ID, cell(a.Skills), cell(a.Instructions))
+		fmt.Fprintf(w, mdAgentRow, a.ID, cell(a.Skills), cell(a.Instructions), cell(a.Commands))
 	}
 
 	fmt.Fprint(w, mdJSONHdr)

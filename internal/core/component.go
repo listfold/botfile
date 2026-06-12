@@ -10,7 +10,8 @@ import (
 // the set grows as agents expose conformant directories (manifesto 24). Today
 // the rigorously specified, broadly supported kinds are skills (manifesto 17),
 // instructions (manifesto 18), and commands: user-invoked prompt files the
-// agent exposes as /name, a drop-in .md per command where natively supported.
+// agent exposes as a slash command (claude-code /name, codex /prompts:name), a
+// drop-in .md per command where natively supported.
 type Kind string
 
 const (

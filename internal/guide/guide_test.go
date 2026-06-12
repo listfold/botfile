@@ -48,7 +48,7 @@ func TestBuildHasModelTermsAndWorkflowOrder(t *testing.T) {
 		t.Fatal("guide has no scope notes")
 	}
 	scope := strings.Join(g.Scope, " ")
-	for _, want := range []string{"user scope", "fan out", "skill is invoked", "ambient", "source > plugin > component", "wildcard"} {
+	for _, want := range []string{"user scope", "fan out", "model-invoked", "user-invoked", "ambient", "source > plugin > component", "wildcard"} {
 		if !strings.Contains(scope, want) {
 			t.Errorf("scope notes missing %q", want)
 		}
@@ -84,10 +84,14 @@ func TestAgentLocationsMatchMatrix(t *testing.T) {
 	}
 
 	cases := []struct {
-		id, skills, instructions string
+		id, skills, instructions, commands string
 	}{
-		{"claude-code", "~/.claude/skills/<name>/", "~/.claude/rules/<name>.md"},
-		{"codex-cli", "~/.agents/skills/<name>/", "~/.codex/AGENTS.md"},
+		{"claude-code", "~/.claude/skills/<name>/", "~/.claude/rules/<name>.md", "~/.claude/commands/<name>.md"},
+		{"codex-cli", "~/.agents/skills/<name>/", "~/.codex/AGENTS.md", "~/.codex/prompts/<name>.md"},
+		{"opencode", "~/.agents/skills/<name>/", "~/.config/opencode/AGENTS.md", "~/.config/opencode/commands/<name>.md"},
+		{"pi.dev", "~/.agents/skills/<name>/", "~/.pi/agent/AGENTS.md", "~/.pi/agent/prompts/<name>.md"},
+		{"copilot-cli", "~/.agents/skills/<name>/", "~/.copilot/copilot-instructions.md", ""},
+		{"crush", "~/.agents/skills/<name>/", "~/.config/crush/CRUSH.md", ""},
 	}
 	for _, c := range cases {
 		a, ok := got[c.id]
@@ -99,6 +103,9 @@ func TestAgentLocationsMatchMatrix(t *testing.T) {
 		}
 		if a.Instructions != c.instructions {
 			t.Errorf("%s instructions = %q, want %q", c.id, a.Instructions, c.instructions)
+		}
+		if a.Commands != c.commands {
+			t.Errorf("%s commands = %q, want %q", c.id, a.Commands, c.commands)
 		}
 	}
 }
@@ -122,8 +129,9 @@ func TestAgentLocationsHonorRootOverrides(t *testing.T) {
 		got[a.ID] = a
 	}
 
-	// claude-code's base override relocates both its skills and instructions.
-	if a := got["claude-code"]; a.Skills != "/work/claude/skills/<name>/" || a.Instructions != "/work/claude/rules/<name>.md" {
+	// claude-code's base override relocates its skills, instructions, and
+	// commands alike.
+	if a := got["claude-code"]; a.Skills != "/work/claude/skills/<name>/" || a.Instructions != "/work/claude/rules/<name>.md" || a.Commands != "/work/claude/commands/<name>.md" {
 		t.Errorf("claude-code did not honor CLAUDE_CONFIG_DIR: %+v", a)
 	}
 	// codex-cli's instruction singleton honors CODEX_HOME; its skills stay in the

@@ -61,8 +61,9 @@ type Issue struct {
 }
 
 // Note is a non-blocking observation. Kind selects which fields are populated:
-// "notice" (shared namespace), "shadowed" (precedence), or "skipped"
-// (unsupported component).
+// "notice" (shared namespace), "shadowed" (source precedence on one target),
+// "shadowed-command" (the agent resolves a same-name skill over the command),
+// or "skipped" (unsupported component).
 type Note struct {
 	Kind string `json:"kind"`
 
@@ -72,12 +73,12 @@ type Note struct {
 	Selection   string   `json:"selection,omitempty"`   // notice: the selection that caused it
 
 	Target string `json:"target,omitempty"` // shadowed
-	Source string `json:"source,omitempty"` // shadowed
+	Source string `json:"source,omitempty"` // shadowed, shadowed-command
 	WonBy  string `json:"wonBy,omitempty"`  // shadowed
 
-	Component string `json:"component,omitempty"` // skipped
-	Agent     string `json:"agent,omitempty"`     // skipped
-	Detail    string `json:"detail,omitempty"`    // skipped
+	Component string `json:"component,omitempty"` // skipped, shadowed-command
+	Agent     string `json:"agent,omitempty"`     // skipped, shadowed-command
+	Detail    string `json:"detail,omitempty"`    // skipped, shadowed-command
 }
 
 // StatusDTO holds what is specific to the status overview.
@@ -230,6 +231,13 @@ func issuesFrom(in []runtime.Blocker) []Issue {
 func notesFrom(m runtime.Model) []Note {
 	var out []Note
 	for _, n := range m.Projection.Notices {
+		if n.Kind == project.NoticeShadowedCommand {
+			out = append(out, Note{
+				Kind: "shadowed-command", Component: n.ComponentID,
+				Agent: string(n.Selected[0]), Source: n.SourceName, Detail: n.Detail,
+			})
+			continue
+		}
 		out = append(out, Note{
 			Kind: "notice", Selected: agentStrings(n.Selected),
 			AlsoReaches: agentStrings(n.AlsoReaches), Namespace: n.Namespace,
