@@ -25,10 +25,12 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
-// version is botfile's release version. It is overridden at release time via
-// -ldflags "-X main.version=<tag>" (GoReleaser); the baked default tracks the
-// current development version.
-var version = "v0.1.0"
+// version is the release tag stamped at build time via
+// -ldflags "-X main.version=<tag>" (scripts/build-matrix.sh). The baked
+// default is deliberately not a release tag: a `go install` source build must
+// identify as dev, so `botfile upgrade` refuses to replace it (it could be
+// ahead of the latest release).
+var version = "dev"
 
 // versionLine is the one-line version string `botfile version` and `--version`
 // print.

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,8 +35,13 @@ func fakeRelease(tag, asset string, bin []byte) map[string][]byte {
 	}
 }
 
-func fetchFrom(m map[string][]byte) func(string) ([]byte, error) {
-	return func(url string) ([]byte, error) {
+// fetchFrom serves the fake release and records the limit each URL was
+// fetched with, so tests can pin the per-endpoint caps.
+func fetchFrom(m map[string][]byte, limits map[string]int64) func(string, int64) ([]byte, error) {
+	return func(url string, limit int64) ([]byte, error) {
+		if limits != nil {
+			limits[url] = limit
+		}
 		b, ok := m[url]
 		if !ok {
 			return nil, fmt.Errorf("GET %s: HTTP 404", url)
@@ -43,11 +50,12 @@ func fetchFrom(m map[string][]byte) func(string) ([]byte, error) {
 	}
 }
 
-// deps builds test deps over a fake release for a linux/amd64 binary at exe.
+// testDeps builds deps over a fake release for a linux/amd64 binary at exe.
 func testDeps(m map[string][]byte, exe string) upgradeDeps {
 	return upgradeDeps{
-		fetch:   fetchFrom(m),
+		fetch:   fetchFrom(m, nil),
 		exePath: func() (string, error) { return exe, nil },
+		rename:  os.Rename,
 		goos:    "linux",
 		goarch:  "amd64",
 	}
@@ -76,7 +84,8 @@ func TestUpgradeCheckJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
 		t.Fatalf("check json: %v\n%s", err, buf.String())
 	}
-	if r.Command != "upgrade" || r.Current != "v0.1.0" || r.Latest != "v0.2.0" || r.UpToDate || r.Applied || r.ExitCode != 0 {
+	if r.Command != "upgrade" || r.Phase != "done" || r.Outcome != "ok" ||
+		r.Current != "v0.1.0" || r.Latest != "v0.2.0" || r.UpToDate || !r.Comparable || r.Applied || r.ExitCode != 0 {
 		t.Errorf("report = %+v, want a clean newer-available check", r)
 	}
 }
@@ -102,11 +111,28 @@ func TestUpgradeRefusesNonReleaseBuild(t *testing.T) {
 		t.Fatalf("dev check exit = %d, want 0", code)
 	}
 	// An apply is blocked: the replacement could be a downgrade.
-	if code := upgradeCmd(&buf, nil, testDeps(m, "/nonexistent")); code != 1 {
+	buf.Reset()
+	if code := upgradeCmd(&buf, []string{"--format", "json"}, testDeps(m, "/nonexistent")); code != 1 {
 		t.Fatalf("dev apply exit = %d, want 1 (blocked)", code)
 	}
-	if !strings.Contains(buf.String(), "not a release build") {
-		t.Errorf("output = %q, want the non-release wording", buf.String())
+	var r upgradeReport
+	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
+		t.Fatalf("blocked json: %v\n%s", err, buf.String())
+	}
+	if r.Outcome != "blocked" || r.ExitCode != 1 || r.Comparable || r.Applied {
+		t.Errorf("report = %+v, want a blocked non-release apply", r)
+	}
+	if !strings.Contains(r.Detail, "not a release build") {
+		t.Errorf("detail = %q, want the non-release wording", r.Detail)
+	}
+}
+
+// TestDefaultVersionIsNotARelease pins finding-2's invariant: a plain
+// `go install ./cmd/botfile` build (no ldflags) must identify as a
+// non-release, so upgrade refuses to replace it.
+func TestDefaultVersionIsNotARelease(t *testing.T) {
+	if _, comparable := releaseCompare(version, "v9.9.9"); comparable {
+		t.Fatalf("baked default version %q compares as a release build; it must be a dev marker", version)
 	}
 }
 
@@ -118,8 +144,11 @@ func TestUpgradeAppliesAndReplacesBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := fakeRelease("v0.2.0", "botfile-linux-amd64", []byte("new binary bytes"))
+	limits := map[string]int64{}
+	deps := testDeps(m, exe)
+	deps.fetch = fetchFrom(m, limits)
 	var buf strings.Builder
-	if code := upgradeCmd(&buf, nil, testDeps(m, exe)); code != 0 {
+	if code := upgradeCmd(&buf, nil, deps); code != 0 {
 		t.Fatalf("apply exit = %d, want 0", code)
 	}
 	got, err := os.ReadFile(exe)
@@ -139,6 +168,34 @@ func TestUpgradeAppliesAndReplacesBinary(t *testing.T) {
 		if strings.HasPrefix(e.Name(), ".botfile-upgrade-") {
 			t.Errorf("staging file %s left behind", e.Name())
 		}
+	}
+	// Per-endpoint caps: small for metadata and manifest, large for the binary.
+	if limits[releaseAPI] != maxMetaBytes || limits[releaseDL+"/v0.2.0/checksums.txt"] != maxMetaBytes {
+		t.Errorf("metadata limits = %v, want %d", limits, int64(maxMetaBytes))
+	}
+	if limits[releaseDL+"/v0.2.0/botfile-linux-amd64"] != maxBinaryBytes {
+		t.Errorf("binary limit = %v, want %d", limits, int64(maxBinaryBytes))
+	}
+}
+
+func TestUpgradeAppliedJSON(t *testing.T) {
+	withVersion(t, "v0.1.0")
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "botfile")
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := fakeRelease("v0.2.0", "botfile-linux-amd64", []byte("new"))
+	var buf strings.Builder
+	if code := upgradeCmd(&buf, []string{"--format=json"}, testDeps(m, exe)); code != 0 {
+		t.Fatalf("apply exit = %d, want 0", code)
+	}
+	var r upgradeReport
+	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
+		t.Fatalf("applied json: %v\n%s", err, buf.String())
+	}
+	if r.Outcome != "ok" || !r.Applied || r.ExitCode != 0 {
+		t.Errorf("report = %+v, want an applied ok run", r)
 	}
 }
 
@@ -164,6 +221,37 @@ func TestUpgradeWindowsRenamesAside(t *testing.T) {
 	}
 }
 
+// TestUpgradeWindowsRollbackRestoresBinary forces the second rename (staged
+// -> exe) to fail and requires the original binary back at its path: a failed
+// upgrade must never leave botfile missing from PATH.
+func TestUpgradeWindowsRollbackRestoresBinary(t *testing.T) {
+	withVersion(t, "v0.1.0")
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "botfile.exe")
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := fakeRelease("v0.2.0", "botfile-windows-amd64.exe", []byte("new"))
+	deps := testDeps(m, exe)
+	deps.goos = "windows"
+	deps.rename = func(oldpath, newpath string) error {
+		// The install step moves the staged temp file onto the exe path.
+		// (Match by basename: EvalSymlinks may canonicalize the directory,
+		// e.g. /var -> /private/var on macOS.)
+		if filepath.Base(newpath) == "botfile.exe" && strings.HasPrefix(filepath.Base(oldpath), ".botfile-upgrade-") {
+			return errors.New("forced install failure")
+		}
+		return os.Rename(oldpath, newpath)
+	}
+	var buf strings.Builder
+	if code := upgradeCmd(&buf, nil, deps); code != 2 {
+		t.Fatalf("failed apply exit = %d, want 2", code)
+	}
+	if got, err := os.ReadFile(exe); err != nil || string(got) != "old" {
+		t.Fatalf("binary after failed upgrade = %q, %v; want the original restored at %s", got, err, exe)
+	}
+}
+
 func TestUpgradeChecksumMismatchKeepsBinary(t *testing.T) {
 	withVersion(t, "v0.1.0")
 	dir := t.TempDir()
@@ -174,8 +262,15 @@ func TestUpgradeChecksumMismatchKeepsBinary(t *testing.T) {
 	m := fakeRelease("v0.2.0", "botfile-linux-amd64", []byte("expected"))
 	m[releaseDL+"/v0.2.0/botfile-linux-amd64"] = []byte("tampered")
 	var buf strings.Builder
-	if code := upgradeCmd(&buf, nil, testDeps(m, exe)); code != 2 {
+	if code := upgradeCmd(&buf, []string{"--format", "json"}, testDeps(m, exe)); code != 2 {
 		t.Fatalf("mismatch exit = %d, want 2", code)
+	}
+	var r upgradeReport
+	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
+		t.Fatalf("mismatch json: %v\n%s", err, buf.String())
+	}
+	if r.Outcome != "failed" || r.ExitCode != 2 || !strings.Contains(r.Detail, "checksum mismatch") {
+		t.Errorf("report = %+v, want a failed checksum-mismatch run", r)
 	}
 	if got, _ := os.ReadFile(exe); string(got) != "old" {
 		t.Errorf("binary after failed upgrade = %q, want untouched old", got)
@@ -193,16 +288,24 @@ func TestUpgradeMissingAssetChecksum(t *testing.T) {
 	}
 }
 
-func TestUpgradeNetworkFailure(t *testing.T) {
+func TestUpgradeNetworkFailureJSON(t *testing.T) {
 	withVersion(t, "v0.1.0")
 	deps := upgradeDeps{
-		fetch:   func(string) ([]byte, error) { return nil, errors.New("no route to host") },
+		fetch:   func(string, int64) ([]byte, error) { return nil, errors.New("no route to host") },
 		exePath: func() (string, error) { return "/nonexistent", nil },
+		rename:  os.Rename,
 		goos:    "linux", goarch: "amd64",
 	}
 	var buf strings.Builder
-	if code := upgradeCmd(&buf, []string{"--check"}, deps); code != 2 {
+	if code := upgradeCmd(&buf, []string{"--check", "--format", "json"}, deps); code != 2 {
 		t.Fatalf("network failure exit = %d, want 2", code)
+	}
+	var r upgradeReport
+	if err := json.Unmarshal([]byte(buf.String()), &r); err != nil {
+		t.Fatalf("failure json: %v\n%s", err, buf.String())
+	}
+	if r.Outcome != "failed" || r.ExitCode != 2 || !strings.Contains(r.Detail, "no route to host") {
+		t.Errorf("report = %+v, want a failed network run", r)
 	}
 }
 
@@ -215,6 +318,24 @@ func TestUpgradeUsageErrors(t *testing.T) {
 	}
 	if code := upgradeCmd(&buf, []string{"--format", "yaml"}, deps); code != 2 {
 		t.Errorf("bad format exit = %d, want 2", code)
+	}
+}
+
+// TestHTTPFetchEnforcesLimit pins the byte cap at the real HTTP boundary: a
+// body at the limit passes, one byte over is an error.
+func TestHTTPFetchEnforcesLimit(t *testing.T) {
+	t.Parallel()
+	body := strings.Repeat("x", 64)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	if got, err := httpFetch(srv.URL, 64); err != nil || len(got) != 64 {
+		t.Errorf("at-limit fetch = %d bytes, %v; want 64, nil", len(got), err)
+	}
+	if _, err := httpFetch(srv.URL, 63); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Errorf("over-limit fetch error = %v, want a limit error", err)
 	}
 }
 

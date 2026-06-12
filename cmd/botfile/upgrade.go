@@ -25,26 +25,39 @@ const (
 	installerHint = "curl -fsSL https://botfile.org/install.sh | sh"
 )
 
-// upgradeDeps are the boundary ports behind `botfile upgrade`: the network
-// fetch, the path of the running binary, and the platform the asset name is
-// built from. Injected so tests run without network, without replacing the
-// test binary, and can exercise the windows rename path on any OS.
+// Response size caps, per endpoint: release metadata and the checksum manifest
+// are small text, a botfile binary is ~10 MiB. A server (or interceptor)
+// streaming more than the cap is an error, not an allocation.
+const (
+	maxMetaBytes   = 1 << 20 // 1 MiB: the release JSON and checksums.txt
+	maxBinaryBytes = 1 << 27 // 128 MiB: far above any real botfile binary
+)
+
+// upgradeDeps are the boundary ports behind `botfile upgrade`: the bounded
+// network fetch, the path of the running binary, the rename used to swap
+// binaries, and the platform the asset name is built from. Injected so tests
+// run without network, without replacing the test binary, can force either
+// rename to fail, and can exercise the windows path on any OS.
 type upgradeDeps struct {
-	fetch   func(url string) ([]byte, error)
+	fetch   func(url string, limit int64) ([]byte, error)
 	exePath func() (string, error)
+	rename  func(oldpath, newpath string) error
 	goos    string
 	goarch  string
 }
 
-// upgradeReport is the JSON form of the run, following the report envelope's
-// convention that exitCode is authoritative.
+// upgradeReport is the single classified result of a run, success or failure,
+// and the value both renderers (text and JSON) work from, following the report
+// envelope's convention that exitCode is authoritative.
 type upgradeReport struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	Command       string `json:"command"`
-	Outcome       string `json:"outcome"`
+	Phase         string `json:"phase"`
+	Outcome       string `json:"outcome"` // ok | blocked | failed
 	Current       string `json:"current"`
-	Latest        string `json:"latest"`
+	Latest        string `json:"latest,omitempty"`
 	UpToDate      bool   `json:"upToDate"`
+	Comparable    bool   `json:"comparable"` // false for a non-release (source/dev) build
 	Applied       bool   `json:"applied"`
 	Detail        string `json:"detail,omitempty"`
 	ExitCode      int    `json:"exitCode"`
@@ -60,34 +73,62 @@ type upgradeReport struct {
 //
 // Exit codes follow the contract: 0 success (up to date, checked, or
 // upgraded), 1 blocked (a non-release build refuses to self-replace), 2 a
-// network, verification, or filesystem failure.
+// network, verification, or filesystem failure. Every outcome, failures
+// included, renders as one report value, so `--format json` always emits the
+// documented envelope.
 func upgradeCmd(w io.Writer, rest []string, deps upgradeDeps) int {
 	checkOnly, format, ok := upgradeArgs(rest)
 	if !ok {
 		return 2
 	}
+	r := runUpgrade(checkOnly, deps)
 
-	body, err := deps.fetch(releaseAPI)
+	if format == "json" {
+		b, _ := json.MarshalIndent(r, "", "  ")
+		fmt.Fprintln(w, string(b))
+		return r.ExitCode
+	}
+	switch {
+	case r.Outcome == "failed":
+		fmt.Fprintf(os.Stderr, "botfile: %s\n", r.Detail)
+	case r.Applied:
+		fmt.Fprintf(w, "upgraded botfile %s -> %s\n", r.Current, r.Latest)
+	case r.UpToDate:
+		fmt.Fprintf(w, "botfile %s is the latest release\n", r.Current)
+	case !r.Comparable:
+		fmt.Fprintf(w, "botfile %s is not a release build; the latest release is %s\n%s\n", r.Current, r.Latest, r.Detail)
+	default:
+		fmt.Fprintf(w, "botfile %s -> %s is available; run `botfile upgrade` to apply\n", r.Current, r.Latest)
+	}
+	return r.ExitCode
+}
+
+// runUpgrade classifies the whole run into one report: resolve, compare, and
+// (unless checkOnly) apply.
+func runUpgrade(checkOnly bool, deps upgradeDeps) upgradeReport {
+	r := upgradeReport{SchemaVersion: 1, Command: "upgrade", Phase: "done", Outcome: "ok", Current: version}
+	fail := func(detail string) upgradeReport {
+		r.Outcome, r.ExitCode, r.Detail = "failed", 2, detail
+		return r
+	}
+
+	body, err := deps.fetch(releaseAPI, maxMetaBytes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "botfile: resolve latest release: %v\n", err)
-		return 2
+		return fail("resolve latest release: " + err.Error())
 	}
 	var rel struct {
 		TagName string `json:"tag_name"`
 	}
 	if err := json.Unmarshal(body, &rel); err != nil || rel.TagName == "" {
-		fmt.Fprintln(os.Stderr, "botfile: resolve latest release: no tag in the release metadata")
-		return 2
+		return fail("resolve latest release: no tag in the release metadata")
 	}
-
-	r := upgradeReport{SchemaVersion: 1, Command: "upgrade", Outcome: "ok", Current: version, Latest: rel.TagName}
-	upToDate, comparable := releaseCompare(version, rel.TagName)
-	r.UpToDate = upToDate
+	r.Latest = rel.TagName
+	r.UpToDate, r.Comparable = releaseCompare(version, rel.TagName)
 
 	switch {
-	case upToDate:
+	case r.UpToDate:
 		r.Detail = "already the latest release"
-	case !comparable:
+	case !r.Comparable:
 		// A "dev" or otherwise non-release build: replacing it could be a
 		// downgrade, and a source build's owner upgrades at the source.
 		r.Detail = "not a release build; upgrade via `go install ./cmd/botfile` from your checkout, or install the release: " + installerHint
@@ -98,29 +139,12 @@ func upgradeCmd(w io.Writer, rest []string, deps upgradeDeps) int {
 		r.Detail = "newer release available; run `botfile upgrade` to apply"
 	default:
 		if err := applyUpgrade(deps, rel.TagName); err != nil {
-			fmt.Fprintf(os.Stderr, "botfile: upgrade to %s: %v\n", rel.TagName, err)
-			return 2
+			return fail("upgrade to " + rel.TagName + ": " + err.Error())
 		}
 		r.Applied = true
 		r.Detail = "binary replaced after checksum verification"
 	}
-
-	if format == "json" {
-		b, _ := json.MarshalIndent(r, "", "  ")
-		fmt.Fprintln(w, string(b))
-		return r.ExitCode
-	}
-	switch {
-	case r.Applied:
-		fmt.Fprintf(w, "upgraded botfile %s -> %s\n", version, rel.TagName)
-	case upToDate:
-		fmt.Fprintf(w, "botfile %s is the latest release\n", version)
-	case !comparable:
-		fmt.Fprintf(w, "botfile %s is not a release build; the latest release is %s\n%s\n", version, rel.TagName, r.Detail)
-	default:
-		fmt.Fprintf(w, "botfile %s -> %s is available; run `botfile upgrade` to apply\n", version, rel.TagName)
-	}
-	return r.ExitCode
+	return r
 }
 
 // upgradeArgs parses upgrade's flags: --check and --format text|json.
@@ -155,15 +179,15 @@ func upgradeArgs(rest []string) (checkOnly bool, format string, ok bool) {
 // applyUpgrade downloads the platform asset for tag, verifies its sha256
 // against the release's checksums.txt, and atomically replaces the running
 // binary. The new binary lands as a temp file in the same directory first, so
-// the final step is a rename and a failure can never leave a half-written
-// botfile on PATH.
+// the final step is a rename and a failure can never leave a half-written or
+// missing botfile on PATH.
 func applyUpgrade(deps upgradeDeps, tag string) error {
 	asset := "botfile-" + deps.goos + "-" + deps.goarch
 	if deps.goos == "windows" {
 		asset += ".exe"
 	}
 
-	sums, err := deps.fetch(releaseDL + "/" + tag + "/checksums.txt")
+	sums, err := deps.fetch(releaseDL+"/"+tag+"/checksums.txt", maxMetaBytes)
 	if err != nil {
 		return fmt.Errorf("download checksums.txt: %w", err)
 	}
@@ -172,7 +196,7 @@ func applyUpgrade(deps upgradeDeps, tag string) error {
 		return fmt.Errorf("no checksum for %s in the release's checksums.txt", asset)
 	}
 
-	bin, err := deps.fetch(releaseDL + "/" + tag + "/" + asset)
+	bin, err := deps.fetch(releaseDL+"/"+tag+"/"+asset, maxBinaryBytes)
 	if err != nil {
 		return fmt.Errorf("download %s: %w", asset, err)
 	}
@@ -208,15 +232,26 @@ func applyUpgrade(deps upgradeDeps, tag string) error {
 
 	// Windows cannot replace a running executable in place; rename it aside
 	// first (the .old file of a running process cannot be deleted, so it is
-	// left behind and overwritten by the next upgrade).
+	// left behind and overwritten by the next upgrade). If installing the new
+	// binary then fails, the original is renamed straight back: a failed
+	// upgrade must never leave the PATH entry missing.
 	if deps.goos == "windows" {
 		old := strings.TrimSuffix(exe, ".exe") + ".old.exe"
 		_ = os.Remove(old)
-		if err := os.Rename(exe, old); err != nil {
+		if err := deps.rename(exe, old); err != nil {
 			return permHint(fmt.Errorf("move the running binary aside: %w", err))
 		}
+		if err := deps.rename(tmpName, exe); err != nil {
+			if rerr := deps.rename(old, exe); rerr != nil {
+				return permHint(fmt.Errorf("install the new binary: %v; restoring the original also failed: %v (it is preserved at %s)", err, rerr, old))
+			}
+			return permHint(fmt.Errorf("install the new binary (original restored): %w", err))
+		}
+		return nil
 	}
-	if err := os.Rename(tmpName, exe); err != nil {
+	// On unix a rename over the destination is atomic, so the original stays
+	// in place up to the instant the new binary fully replaces it.
+	if err := deps.rename(tmpName, exe); err != nil {
 		return permHint(fmt.Errorf("install the new binary: %w", err))
 	}
 	return nil
@@ -245,9 +280,9 @@ func checksumFor(sums, asset string) (string, bool) {
 
 // releaseCompare reports whether current is at least latest (upToDate) and
 // whether both were comparable vX.Y.Z release tags. A version that does not
-// parse (a "dev" snapshot, say) is never up to date and not comparable, so
-// the caller can word the outcome honestly rather than urge what might be a
-// downgrade.
+// parse (the "dev" default of a source build) is never up to date and not
+// comparable, so the caller can word the outcome honestly rather than urge
+// what might be a downgrade.
 func releaseCompare(current, latest string) (upToDate, comparable bool) {
 	if current == latest {
 		return true, true
@@ -283,21 +318,23 @@ func parseRelease(v string) ([3]int, bool) {
 	return out, true
 }
 
-// osUpgradeDeps wires the real boundary: HTTP with a bounded timeout, the
-// process's own executable path, and the build platform.
+// osUpgradeDeps wires the real boundary: bounded HTTP, the process's own
+// executable path, the real rename, and the build platform.
 func osUpgradeDeps() upgradeDeps {
 	return upgradeDeps{
 		fetch:   httpFetch,
 		exePath: os.Executable,
+		rename:  os.Rename,
 		goos:    runtime.GOOS,
 		goarch:  runtime.GOARCH,
 	}
 }
 
-// httpFetch GETs url and returns the body; a non-200 status is an error. The
-// timeout bounds the whole request, so a stalled network cannot hang the cli.
-func httpFetch(url string) ([]byte, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
+// httpFetch GETs url and returns at most limit bytes of body; a non-200
+// status or an over-limit response is an error. The timeout bounds the whole
+// request, so a stalled network cannot hang the cli.
+func httpFetch(url string, limit int64) ([]byte, error) {
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, err
@@ -306,5 +343,12 @@ func httpFetch(url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s: HTTP %d", url, resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, fmt.Errorf("GET %s: response exceeds the %d-byte limit", url, limit)
+	}
+	return body, nil
 }
