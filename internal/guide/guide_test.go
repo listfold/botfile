@@ -48,7 +48,7 @@ func TestBuildHasModelTermsAndWorkflowOrder(t *testing.T) {
 		t.Fatal("guide has no scope notes")
 	}
 	scope := strings.Join(g.Scope, " ")
-	for _, want := range []string{"user scope", "fan out", "model-invoked", "user-invoked", "ambient", "source > plugin > component", "wildcard"} {
+	for _, want := range []string{"user scope", "fan out", "ambient", "on-demand", "runs explicitly", "source > plugin > component", "wildcard"} {
 		if !strings.Contains(scope, want) {
 			t.Errorf("scope notes missing %q", want)
 		}

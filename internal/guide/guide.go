@@ -250,7 +250,7 @@ func RenderMarkdown(w io.Writer, g Guide) {
 	fmt.Fprint(w, mdAgentsHdr)
 	fmt.Fprint(w, mdAgentsHead)
 	for _, a := range g.Agents {
-		fmt.Fprintf(w, mdAgentRow, a.ID, cell(a.Skills), cell(a.Instructions), cell(a.Commands))
+		fmt.Fprintf(w, mdAgentRow, a.ID, mdCell(a.Skills), mdCell(a.Instructions), mdCell(a.Commands))
 	}
 
 	fmt.Fprint(w, mdJSONHdr)
@@ -265,6 +265,15 @@ func cell(s string) string {
 		return emptyCell
 	}
 	return s
+}
+
+// mdCell renders a location as inline code, or a plain dash when the agent
+// has no surface for the kind (a backticked dash would read as a literal).
+func mdCell(s string) string {
+	if s == "" {
+		return emptyCell
+	}
+	return "`" + s + "`"
 }
 
 // splitLines splits a multi-line constant into lines for indented text output.

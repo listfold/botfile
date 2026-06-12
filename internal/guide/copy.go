@@ -24,7 +24,7 @@ agents = ["claude-code"]`
 // modelTerms defines the four nouns botfile's config is built from.
 var modelTerms = []Term{
 	{"source", "A local directory, often a git checkout, holding curated components. botfile reads it in place; git does any fetching."},
-	{"plugin", "A named bundle inside a source. Even a single-bundle source has an explicit plugin directory: <source>/<plugin>/."},
+	{"plugin", "A named bundle inside a source. Even a single-bundle source has an explicit plugin directory: `<source>/<plugin>/`."},
 	{"component", "A typed artifact under a plugin. Kinds today: a skill (a directory with a SKILL.md), an instruction (a .md file), and a command (a .md file the agent exposes as a slash command)."},
 	{"selection", "A config rule mapping a source (and optionally one plugin or component) to one or more agents that should receive it."},
 }
@@ -35,8 +35,8 @@ var modelTerms = []Term{
 var scopeNotes = []string{
 	"botfile operates at user scope only: the per-user paths under your home directory. It never writes into a project checkout (a repo's .claude/ or an in-repo AGENTS.md); project-scoped components belong to the project.",
 	"Selections fan out: one component reaches every agent its selections name, one symlink per agent's native path, and agents reading the shared ~/.agents/skills pool are served by a single link. Symlinks, not copies, so an edit to the source is live through every agent at once.",
-	"The kinds differ in invocation, which drives scoping care: an instruction is ambient (the harness injects it into every session), so it matters that instructions can be scoped to all, some, or one agent; a skill is model-invoked when relevant and a command is user-invoked (a slash command), so both cost nothing until used and scoping them tightly is rarely critical. Not every agent supports commands; the agents table shows a dash where a kind has no native surface.",
-	"A selection picks any depth of source > plugin > component: omit plugin and component for the whole source, set plugin for one bundle, set both for a single component (component is <kind>/<name>, like skill/review).",
+	"The kinds differ in how they reach the model: an instruction is ambient (the harness injects it into every session), so it matters that instructions can be scoped to all, some, or one agent; a skill is on-demand: its name and description always sit in context and its body loads when the model matches it to the task or the user invokes it; a command is a prompt file the user runs explicitly (/name). On-demand kinds are cheap when idle, not free. Not every agent supports commands; the agents table shows a dash where a kind has no native surface.",
+	"A selection picks any depth of source > plugin > component: omit plugin and component for the whole source, set plugin for one bundle, set both for a single component (component is `<kind>/<name>`, like `skill/review`).",
 	"An omitted plugin or component is a wildcard; an unknown config key is rejected rather than ignored, so a typo cannot silently widen a selection.",
 }
 
@@ -98,7 +98,7 @@ const (
 	mdCommandRow   = "| `%s` | %s |\n"
 	mdAgentsHdr    = "\n## Agents\n\n"
 	mdAgentsHead   = "| Agent | Skills | Instructions | Commands |\n|---|---|---|---|\n"
-	mdAgentRow     = "| `%s` | `%s` | `%s` | `%s` |\n"
+	mdAgentRow     = "| `%s` | %s | %s | %s |\n" // id, then mdCell-rendered locations
 	mdJSONHdr      = "\n## JSON for agents\n\n"
 	mdJSONRow      = "- %s\n"
 )
