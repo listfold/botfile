@@ -84,16 +84,27 @@ func TestFindUnmanagedSkillsAndInstructions(t *testing.T) {
 	}
 	// A non-component file in the instruction namespace (no .md): ignored.
 	fsys.AddFile(rules + "/notes.txt")
+	// A real, agent-created command file, and a managed (symlink) one.
+	commands := "/home/u/.claude/commands"
+	if err := fsys.MkdirAll(commands); err != nil {
+		t.Fatal(err)
+	}
+	fsys.AddFile(commands + "/open-pr.md")
+	if err := fsys.Symlink("/src/team/p/commands/release.md", commands+"/release.md"); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := Find(fsys, []Namespace{
 		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Dir: skills},
 		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindInstruction, Dir: rules, Ext: ".md"},
+		{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindCommand, Dir: commands, Ext: ".md"},
 	})
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
 
-	want := []string{"instruction/preferences", "skill/bark-pro"} // sorted by path: rules/ before skills/
+	// Sorted by path: commands/ before rules/ before skills/.
+	want := []string{"command/open-pr", "instruction/preferences", "skill/bark-pro"}
 	if len(got) != len(want) {
 		t.Fatalf("found %d, want %d: %+v", len(got), len(want), got)
 	}

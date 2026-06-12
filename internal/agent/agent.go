@@ -437,6 +437,11 @@ func Default() Set {
 				// claude-code reads <root>/rules/<name>.md as part of init: a drop-in
 				// directory of one file per instruction; tier 1 (manifesto 18, 22).
 				core.KindInstruction: {Tier: Tier1, Segments: []string{"rules"}, Shape: LeafFile, Ext: ".md"},
+				// claude-code exposes <root>/commands/<name>.md as the /name slash
+				// command: a drop-in directory of one file per command, found by
+				// presence; tier 1 (manifesto 22).
+				// Source: code.claude.com/docs (slash commands).
+				core.KindCommand: {Tier: Tier1, Segments: []string{"commands"}, Shape: LeafFile, Ext: ".md"},
 			},
 		},
 		Spec{
@@ -459,6 +464,15 @@ func Default() Set {
 				core.KindInstruction: {
 					Tier: Tier2, Base: &Base{HomeRelative: []string{".codex"}, EnvOverride: "CODEX_HOME"},
 					Shape: LeafFixed, Filename: "AGENTS.md",
+				},
+				// codex exposes ~/.codex/prompts/<name>.md as the /name custom prompt
+				// (CODEX_HOME relocates ~/.codex): a drop-in, one file per command;
+				// tier 1. Upstream has deprecated custom prompts in favor of skills
+				// but still loads them; retire this rule if they are removed.
+				// Source: developers.openai.com/codex/custom-prompts.
+				core.KindCommand: {
+					Tier: Tier1, Base: &Base{HomeRelative: []string{".codex"}, EnvOverride: "CODEX_HOME"},
+					Segments: []string{"prompts"}, Shape: LeafFile, Ext: ".md",
 				},
 			},
 		},
@@ -484,6 +498,9 @@ func Default() Set {
 					Tier: Tier2, Base: &Base{HomeRelative: []string{".copilot"}, EnvOverride: "COPILOT_HOME"},
 					Shape: LeafFixed, Filename: "copilot-instructions.md",
 				},
+				// No command rule: copilot-cli has no user-defined prompt/command
+				// mechanism (built-in slash commands only; upstream feature requests
+				// github/copilot-cli#618, #1113 remain open).
 			},
 		},
 		Spec{
@@ -506,6 +523,11 @@ func Default() Set {
 					Tier: Tier1, Base: &Base{HomeRelative: []string{".copilot"}},
 					Segments: []string{"instructions"}, Shape: LeafFile, Ext: ".instructions.md",
 				},
+				// No command rule: VS Code prompt files (<name>.prompt.md, run as
+				// /name) live in the editor's per-profile user-data dir, which has no
+				// stable home path across profiles or platforms, so there is no
+				// conformant surface to symlink into (manifesto 19).
+				// Source: code.visualstudio.com/docs/agent-customization/prompt-files.
 			},
 		},
 		Spec{
@@ -529,6 +551,10 @@ func Default() Set {
 					Tier: Tier2, Base: &Base{HomeRelative: []string{".config", "crush"}},
 					Shape: LeafFixed, Filename: "CRUSH.md",
 				},
+				// No command rule: crush has no command directory; its user-invoked
+				// surface is a skill with `user-invocable: true` frontmatter, reached
+				// from the palette. Author such a component as a skill instead.
+				// Source: github.com/charmbracelet/crush (Agent Skills; issue #2219).
 			},
 		},
 		Spec{
@@ -551,6 +577,13 @@ func Default() Set {
 					Tier: Tier2, Base: &Base{HomeRelative: []string{".config", "opencode"}},
 					Shape: LeafFixed, Filename: "AGENTS.md",
 				},
+				// opencode exposes ~/.config/opencode/commands/<name>.md as the /name
+				// custom command: a drop-in, one file per command; tier 1.
+				// Source: opencode.ai/docs/commands.
+				core.KindCommand: {
+					Tier: Tier1, Base: &Base{HomeRelative: []string{".config", "opencode"}},
+					Segments: []string{"commands"}, Shape: LeafFile, Ext: ".md",
+				},
 			},
 		},
 		Spec{
@@ -569,6 +602,13 @@ func Default() Set {
 				core.KindInstruction: {
 					Tier: Tier2, Base: &Base{HomeRelative: []string{".pi", "agent"}},
 					Shape: LeafFixed, Filename: "AGENTS.md",
+				},
+				// pi.dev exposes ~/.pi/agent/prompts/<name>.md as the /name prompt
+				// template: a drop-in, one file per command; tier 1.
+				// Source: pi.dev/docs/latest/prompt-templates.
+				core.KindCommand: {
+					Tier: Tier1, Base: &Base{HomeRelative: []string{".pi", "agent"}},
+					Segments: []string{"prompts"}, Shape: LeafFile, Ext: ".md",
 				},
 			},
 		},

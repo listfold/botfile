@@ -105,9 +105,9 @@ func classify(fsys fsport.FS, ns Namespace, name, path string, entry fsport.Entr
 		}
 		return Unmanaged{Agents: ns.Agents, Kind: core.KindSkill, Name: name, Path: path}, true
 
-	case core.KindInstruction:
+	case core.KindInstruction, core.KindCommand:
 		if !entry.IsRegular {
-			return Unmanaged{}, false // an instruction is a regular file (manifesto 48)
+			return Unmanaged{}, false // an instruction or command is a regular file (manifesto 48)
 		}
 		// A singleton (fixed-file) instruction takes its identity from its agent,
 		// not its filename: the fixed filename is an agent install-path detail, not
@@ -120,20 +120,21 @@ func classify(fsys fsport.FS, ns Namespace, name, path string, entry fsport.Entr
 			if len(ns.Agents) == 0 {
 				return Unmanaged{}, false
 			}
-			return Unmanaged{Agents: ns.Agents, Kind: core.KindInstruction, Name: string(ns.Agents[0]), Path: path}, true
+			return Unmanaged{Agents: ns.Agents, Kind: ns.Kind, Name: string(ns.Agents[0]), Path: path}, true
 		}
-		// A drop-in instruction's name is its leaf with the agent's install
-		// extension removed (claude-code ".md", copilot-vscode ".instructions.md").
-		// The extension comes from the namespace, not a hardcoded ".md", so a
-		// compound leaf like foo.instructions.md adopts as instruction/foo.
+		// A drop-in instruction's or command's name is its leaf with the agent's
+		// install extension removed (claude-code ".md", copilot-vscode
+		// ".instructions.md"). The extension comes from the namespace, not a
+		// hardcoded ".md", so a compound leaf like foo.instructions.md adopts as
+		// instruction/foo.
 		if ns.Ext == "" || !strings.HasSuffix(name, ns.Ext) {
 			return Unmanaged{}, false
 		}
 		iname := strings.TrimSuffix(name, ns.Ext)
-		if core.ValidateName("instruction name", iname) != nil {
+		if core.ValidateName(string(ns.Kind)+" name", iname) != nil {
 			return Unmanaged{}, false
 		}
-		return Unmanaged{Agents: ns.Agents, Kind: core.KindInstruction, Name: iname, Path: path}, true
+		return Unmanaged{Agents: ns.Agents, Kind: ns.Kind, Name: iname, Path: path}, true
 
 	default:
 		return Unmanaged{}, false

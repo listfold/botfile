@@ -14,6 +14,7 @@ func TestParseComponentID(t *testing.T) {
 		{name: "wildcard", id: "*", wantWild: true},
 		{name: "skill", id: "skill/go-style", wantRef: ComponentRef{Kind: KindSkill, Name: "go-style"}},
 		{name: "instruction", id: "instruction/coding", wantRef: ComponentRef{Kind: KindInstruction, Name: "coding"}},
+		{name: "command", id: "command/open-pr", wantRef: ComponentRef{Kind: KindCommand, Name: "open-pr"}},
 		{name: "no slash", id: "skill", wantErr: true},
 		{name: "unknown kind", id: "hook/pre", wantErr: true},
 		{name: "empty name", id: "skill/", wantErr: true},

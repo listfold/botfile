@@ -20,6 +20,7 @@ func TestScanWellFormed(t *testing.T) {
 		"coding/skills/go-style/SKILL.md":     file("# go style"),
 		"coding/skills/go-style/reference.md": file("resource inside the skill, not a separate component"),
 		"coding/instructions/style.md":        file("an instruction"),
+		"coding/commands/changelog.md":        file("a command"),
 		"coding/README.md":                    file("furniture under a plugin, ignored"),
 		"secrets/skills/deploy/SKILL.md":      file("# deploy"),
 		".git/config":                         file("[core]"),
@@ -37,12 +38,13 @@ func TestScanWellFormed(t *testing.T) {
 	if coding.Name != "coding" {
 		t.Fatalf("first plugin = %q, want coding", coding.Name)
 	}
-	// Sorted by kind then name: instruction before skill.
+	// Sorted by kind then name: command before instruction before skill.
 	want := []core.Component{
+		{Kind: core.KindCommand, Name: "changelog"},
 		{Kind: core.KindInstruction, Name: "style"},
 		{Kind: core.KindSkill, Name: "go-style"},
 	}
-	if len(coding.Components) != 2 || coding.Components[0] != want[0] || coding.Components[1] != want[1] {
+	if len(coding.Components) != 3 || coding.Components[0] != want[0] || coding.Components[1] != want[1] || coding.Components[2] != want[2] {
 		t.Fatalf("coding components = %+v, want %+v", coding.Components, want)
 	}
 
@@ -97,6 +99,25 @@ func TestScanInstructionNotMarkdownIsProblem(t *testing.T) {
 	}
 	if !hasProblem(res, ProblemInstructionNotMarkdown, "p/instructions/sub") {
 		t.Fatalf("expected instruction-not-markdown for the sub directory, got %+v", res.Problems)
+	}
+}
+
+func TestScanCommandNotMarkdownIsProblem(t *testing.T) {
+	t.Parallel()
+	fsys := fstest.MapFS{
+		"p/commands/release.md": file("good command"),
+		"p/commands/release.sh": file("wrong extension"),
+		"p/commands/sub/x.md":   file("a directory under commands is wrong too"),
+	}
+	res := Scan(fsys)
+	if got := componentNames(res); len(got) != 1 || got[0] != "command/release" {
+		t.Fatalf("components = %v, want [command/release]", got)
+	}
+	if !hasProblem(res, ProblemCommandNotMarkdown, "p/commands/release.sh") {
+		t.Fatalf("expected command-not-markdown for release.sh, got %+v", res.Problems)
+	}
+	if !hasProblem(res, ProblemCommandNotMarkdown, "p/commands/sub") {
+		t.Fatalf("expected command-not-markdown for the sub directory, got %+v", res.Problems)
 	}
 }
 
@@ -204,11 +225,17 @@ func TestLayoutRoundTrip(t *testing.T) {
 	if d, ok := DirForKind(core.KindInstruction); !ok || d != "instructions" {
 		t.Errorf("DirForKind(instruction) = %q,%v, want instructions,true", d, ok)
 	}
+	if d, ok := DirForKind(core.KindCommand); !ok || d != "commands" {
+		t.Errorf("DirForKind(command) = %q,%v, want commands,true", d, ok)
+	}
 	if got := ComponentLeaf(core.Component{Kind: core.KindSkill, Name: "go-style"}); got != "go-style" {
 		t.Errorf("ComponentLeaf(skill) = %q, want go-style", got)
 	}
 	if got := ComponentLeaf(core.Component{Kind: core.KindInstruction, Name: "style"}); got != "style.md" {
 		t.Errorf("ComponentLeaf(instruction) = %q, want style.md", got)
+	}
+	if got := ComponentLeaf(core.Component{Kind: core.KindCommand, Name: "changelog"}); got != "changelog.md" {
+		t.Errorf("ComponentLeaf(command) = %q, want changelog.md", got)
 	}
 }
 

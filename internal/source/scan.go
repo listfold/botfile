@@ -21,7 +21,7 @@ const (
 	// (core.ValidateName): whitespace, a separator, or the wildcard token.
 	ProblemInvalidName
 	// ProblemUnknownKindDir: a directory under a plugin is not a recognized kind
-	// directory (manifesto 47: skills/, instructions/).
+	// directory (manifesto 47: skills/, instructions/, commands/).
 	ProblemUnknownKindDir
 	// ProblemStraySkillFile: a non-directory entry sits directly under skills/,
 	// where a skill must be a directory (manifesto 48).
@@ -36,6 +36,9 @@ const (
 	// directory, where entries are component candidates, so it is reported rather
 	// than silently skipped.
 	ProblemHiddenComponent
+	// ProblemCommandNotMarkdown: an entry under commands/ is not a regular .md
+	// file (manifesto 48).
+	ProblemCommandNotMarkdown
 )
 
 // String renders a ProblemKind as a stable, human-readable token.
@@ -55,6 +58,8 @@ func (k ProblemKind) String() string {
 		return "instruction-not-markdown"
 	case ProblemHiddenComponent:
 		return "hidden-component"
+	case ProblemCommandNotMarkdown:
+		return "command-not-markdown"
 	default:
 		return "unknown-problem"
 	}
@@ -135,7 +140,7 @@ func scanPlugin(fsys fs.FS, name string, res *Result) {
 		if !ok {
 			res.Problems = append(res.Problems, Problem{
 				Kind: ProblemUnknownKindDir, Path: path.Join(name, e.Name()),
-				Detail: "not a recognized kind directory (expected skills/ or instructions/)",
+				Detail: "not a recognized kind directory (expected skills/, instructions/, or commands/)",
 			})
 			continue
 		}
@@ -169,8 +174,8 @@ func scanKind(fsys fs.FS, pluginName, kindDir string, kind core.Kind, plugin *co
 		switch kind {
 		case core.KindSkill:
 			scanSkill(fsys, base, e, plugin, res)
-		case core.KindInstruction:
-			scanInstruction(base, e, plugin, res)
+		case core.KindInstruction, core.KindCommand:
+			scanMarkdownComponent(base, e, kind, plugin, res)
 		}
 	}
 }
@@ -205,22 +210,26 @@ func scanSkill(fsys fs.FS, base string, e fs.DirEntry, plugin *core.Plugin, res 
 	plugin.Components = append(plugin.Components, comp)
 }
 
-// scanInstruction validates one entry under instructions/: it must be a
-// <name>.md file (manifesto 48).
-func scanInstruction(base string, e fs.DirEntry, plugin *core.Plugin, res *Result) {
+// scanMarkdownComponent validates one entry under instructions/ or commands/:
+// either kind is a single <name>.md file (manifesto 48).
+func scanMarkdownComponent(base string, e fs.DirEntry, kind core.Kind, plugin *core.Plugin, res *Result) {
 	entryPath := path.Join(base, e.Name())
-	// An instruction must be a regular .md file: not a directory, symlink, or
+	problem, noun := ProblemInstructionNotMarkdown, "an instruction"
+	if kind == core.KindCommand {
+		problem, noun = ProblemCommandNotMarkdown, "a command"
+	}
+	// The component must be a regular .md file: not a directory, symlink, or
 	// other special entry (manifesto 48). DirEntry.Type does not follow symlinks,
 	// so a symlink entry is correctly rejected as non-regular.
 	name, ok := InstructionName(e.Name())
 	if !e.Type().IsRegular() || !ok {
 		res.Problems = append(res.Problems, Problem{
-			Kind: ProblemInstructionNotMarkdown, Path: entryPath,
-			Detail: "an instruction must be a regular " + instructionExt + " file",
+			Kind: problem, Path: entryPath,
+			Detail: noun + " must be a regular " + instructionExt + " file",
 		})
 		return
 	}
-	comp := core.Component{Kind: core.KindInstruction, Name: name}
+	comp := core.Component{Kind: kind, Name: name}
 	if err := comp.Validate(); err != nil {
 		res.Problems = append(res.Problems, Problem{Kind: ProblemInvalidName, Path: entryPath, Detail: err.Error()})
 		return

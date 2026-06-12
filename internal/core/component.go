@@ -8,19 +8,21 @@ import (
 // Kind is the kind of a component (manifesto 7). botfile supports a kind only
 // where the agent treats it in a way manageable by symlinks (manifesto 19);
 // the set grows as agents expose conformant directories (manifesto 24). Today
-// the rigorously specified, broadly supported kinds are skills (manifesto 17)
-// and instructions (manifesto 18).
+// the rigorously specified, broadly supported kinds are skills (manifesto 17),
+// instructions (manifesto 18), and commands: user-invoked prompt files the
+// agent exposes as /name, a drop-in .md per command where natively supported.
 type Kind string
 
 const (
 	KindSkill       Kind = "skill"
 	KindInstruction Kind = "instruction"
+	KindCommand     Kind = "command"
 )
 
 // knownKinds is the canonical set of component kinds botfile models today. It
 // grows by adding a constant here as an agent exposes a conformant directory
 // for a new kind (manifesto 19, 24).
-var knownKinds = []Kind{KindSkill, KindInstruction}
+var knownKinds = []Kind{KindSkill, KindInstruction, KindCommand}
 
 // IsKnownKind reports whether k names a component kind botfile models.
 func IsKnownKind(k Kind) bool {

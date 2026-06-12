@@ -338,9 +338,10 @@ func TestStatusRunDiscoversThenDone(t *testing.T) {
 	if !ok || m.Phase != PhaseDiscovering {
 		t.Fatalf("status after WorldRead = phase %v cmd %T, want Discovering + CmdDiscover", m.Phase, cmd)
 	}
-	// claude-code is the only targeted agent: skills and rules namespaces.
-	if len(disc.Namespaces) != 2 {
-		t.Fatalf("namespaces = %+v, want claude skills + rules", disc.Namespaces)
+	// claude-code is the only targeted agent: skills, rules, and commands
+	// namespaces.
+	if len(disc.Namespaces) != 3 {
+		t.Fatalf("namespaces = %+v, want claude skills + rules + commands", disc.Namespaces)
 	}
 
 	found := []discover.Unmanaged{{Agents: []core.AgentID{core.AgentClaudeCode}, Kind: core.KindSkill, Name: "bark-pro", Path: "/home/u/.claude/skills/bark-pro"}}

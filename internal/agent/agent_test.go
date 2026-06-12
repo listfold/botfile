@@ -27,6 +27,41 @@ func TestDefaultClaudeCodeTargets(t *testing.T) {
 	if !ok || instr != "/home/u/.claude/rules/style.md" {
 		t.Errorf("instruction target = %q,%v, want /home/u/.claude/rules/style.md", instr, ok)
 	}
+	cmd, ok := ag.Target(root, core.KindCommand, "open-pr")
+	if !ok || cmd != "/home/u/.claude/commands/open-pr.md" {
+		t.Errorf("command target = %q,%v, want /home/u/.claude/commands/open-pr.md", cmd, ok)
+	}
+}
+
+func TestDefaultCommandSupport(t *testing.T) {
+	t.Parallel()
+	set := Default()
+	roots := set.ResolveRoots("/home/u", noEnv)
+	// The four agents with a native drop-in command/prompt directory.
+	want := map[core.AgentID]string{
+		core.AgentClaudeCode: "/home/u/.claude/commands/x.md",
+		core.AgentCodexCLI:   "/home/u/.codex/prompts/x.md",
+		core.AgentOpenCode:   "/home/u/.config/opencode/commands/x.md",
+		core.AgentPiDev:      "/home/u/.pi/agent/prompts/x.md",
+	}
+	for id, wantPath := range want {
+		ag, _ := set.Lookup(id)
+		root, ok := roots.For(id, core.KindCommand)
+		if !ok {
+			t.Errorf("%s: no command root", id)
+			continue
+		}
+		if got, ok := ag.Target(root, core.KindCommand, "x"); !ok || got != wantPath {
+			t.Errorf("%s command target = %q,%v, want %q", id, got, ok, wantPath)
+		}
+	}
+	// The three without a conformant surface stay cleanly unsupported.
+	for _, id := range []core.AgentID{core.AgentCopilotCLI, core.AgentCopilotVSCode, core.AgentCrush} {
+		ag, _ := set.Lookup(id)
+		if ag.Supports(core.KindCommand) {
+			t.Errorf("%s must not support the command kind", id)
+		}
+	}
 }
 
 func TestRootHonorsEnvOverride(t *testing.T) {

@@ -4,9 +4,10 @@
 //	<source>/<plugin>/<kind>/<component>
 //
 // The first level under the source root is always a plugin, the second is
-// always a kind directory (plural: skills/, instructions/), and the third is the
-// component: a skill is a directory containing SKILL.md, an instruction is a
-// <name>.md file. The scanner is the I/O port that produces the desired
+// always a kind directory (plural: skills/, instructions/, commands/), and the
+// third is the component: a skill is a directory containing SKILL.md, an
+// instruction or command is a <name>.md file. The scanner is the I/O port that
+// produces the desired
 // component set; it reads through an io/fs.FS so it is testable without the
 // real disk, and reports malformed entries as typed Problems rather than
 // dropping them silently (reviews/patterns.md, explicit outcome algebra).
@@ -22,7 +23,8 @@ import (
 // (agentskills.io, manifesto 17, 48).
 const ManifestFile = "SKILL.md"
 
-// instructionExt is the extension of an instruction file (manifesto 18, 48).
+// instructionExt is the extension of an instruction or command file (manifesto
+// 18, 48); both kinds are a single drop-in .md per component.
 const instructionExt = ".md"
 
 // kindForDir maps each plural on-disk kind directory (manifesto 47) to its
@@ -31,6 +33,7 @@ const instructionExt = ".md"
 var kindForDir = map[string]core.Kind{
 	"skills":       core.KindSkill,
 	"instructions": core.KindInstruction,
+	"commands":     core.KindCommand,
 }
 
 // dirForKind is the inverse of kindForDir, built once at init so both
@@ -54,11 +57,11 @@ func DirForKind(k core.Kind) (string, bool) {
 
 // ComponentLeaf returns the on-disk leaf name of a component within its kind
 // directory (manifesto 48): "<name>" for a skill (a directory) and "<name>.md"
-// for an instruction (a file). It is the inverse of how the scanner derives a
-// component name from a directory entry, so a scanned component round-trips back
-// to its path.
+// for an instruction or command (a file). It is the inverse of how the scanner
+// derives a component name from a directory entry, so a scanned component
+// round-trips back to its path.
 func ComponentLeaf(c core.Component) string {
-	if c.Kind == core.KindInstruction {
+	if c.Kind == core.KindInstruction || c.Kind == core.KindCommand {
 		return c.Name + instructionExt
 	}
 	return c.Name
