@@ -11,6 +11,7 @@ botfile/
 standards/
   skills/echo/SKILL.md
   instructions/no-em-dashes.md
+  commands/changelog.md
 ```
 
 Declare it as a source in `~/.config/botfile/config.toml` and run

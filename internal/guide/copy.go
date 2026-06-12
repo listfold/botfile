@@ -10,10 +10,12 @@ package guide
 const Tagline = "botfile manages AI-agent skills, instructions, and commands as symlinks from source repositories you control."
 
 // minimalConfig is the smallest config.toml that does something: one source,
-// one selection for one agent. Shown verbatim in every format.
+// one selection for one agent. Shown verbatim in every format. The location is
+// the leaf directory that is the source repo, conventionally one of several
+// under ~/botfiles/ (matching the layout guidance on botfile.org/agents.html).
 const minimalConfig = `[[sources]]
 name = "personal"
-location = "~/botfiles"
+location = "~/botfiles/personal"
 
 [[selections]]
 source = "personal"

@@ -1,11 +1,11 @@
 ---
 name: bootstrap-botfile
-description: Drive the botfile CLI to manage AI-agent skills and instructions. Use when asked to sync, plan, adopt, or check the status of agent components managed by botfile.
+description: Drive the botfile CLI to manage AI-agent skills, instructions, and commands. Use when asked to sync, plan, adopt, or check the status of agent components managed by botfile.
 ---
 
 # botfile
 
-botfile manages AI-agent skills and instructions as symlinks from source repositories you control.
+botfile manages AI-agent skills, instructions, and commands as symlinks from source repositories you control.
 
 This skill carries botfile's operator guide. The CLI prints the same guide: run `botfile guide` (or `botfile guide --format markdown|json`); it is also published at [botfile.org/agents.html](https://botfile.org/agents.html). If `botfile` is not on PATH, install it first (with the user's agreement) per [botfile.org](https://botfile.org/#install).
 
@@ -13,7 +13,7 @@ This skill carries botfile's operator guide. The CLI prints the same guide: run 
 
 - **source**: A local directory, often a git checkout, holding curated components. botfile reads it in place; git does any fetching.
 - **plugin**: A named bundle inside a source. Even a single-bundle source has an explicit plugin directory: `<source>/<plugin>/`.
-- **component**: A typed artifact under a plugin. Kinds today: a skill (a directory with a SKILL.md) and an instruction (a .md file).
+- **component**: A typed artifact under a plugin. Kinds today: a skill (a directory with a SKILL.md), an instruction (a .md file), and a command (a .md file the agent exposes as a slash command).
 - **selection**: A config rule mapping a source (and optionally one plugin or component) to one or more agents that should receive it.
 
 ## Config
@@ -23,7 +23,7 @@ Path: `~/.config/botfile/config.toml`
 ```toml
 [[sources]]
 name = "personal"
-location = "~/botfiles"
+location = "~/botfiles/personal"
 
 [[selections]]
 source = "personal"
@@ -34,7 +34,7 @@ agents = ["claude-code"]
 
 - botfile operates at user scope only: the per-user paths under your home directory. It never writes into a project checkout (a repo's .claude/ or an in-repo AGENTS.md); project-scoped components belong to the project.
 - Selections fan out: one component reaches every agent its selections name, one symlink per agent's native path, and agents reading the shared ~/.agents/skills pool are served by a single link. Symlinks, not copies, so an edit to the source is live through every agent at once.
-- The two kinds differ in reach: a skill is invoked at runtime when relevant, so scoping skills to a subset of agents is rarely critical; an instruction is ambient guidance the agent harness injects into every session, so it matters that instructions can be scoped to all, some, or one agent.
+- The kinds differ in invocation, which drives scoping care: an instruction is ambient (the harness injects it into every session), so it matters that instructions can be scoped to all, some, or one agent; a skill is model-invoked when relevant and a command is user-invoked (a slash command), so both cost nothing until used and scoping them tightly is rarely critical. Not every agent supports commands; the agents table shows a dash where a kind has no native surface.
 - A selection picks any depth of source > plugin > component: omit plugin and component for the whole source, set plugin for one bundle, set both for a single component (component is `<kind>/<name>`, like `skill/review`).
 - An omitted plugin or component is a wildcard; an unknown config key is rejected rather than ignored, so a typo cannot silently widen a selection.
 
@@ -61,15 +61,15 @@ Run in this order; only run `sync` after the user agrees.
 
 ## Agents
 
-| Agent | Skills | Instructions |
-|---|---|---|
-| `claude-code` | `~/.claude/skills/<name>/` | `~/.claude/rules/<name>.md` |
-| `codex-cli` | `~/.agents/skills/<name>/` | `~/.codex/AGENTS.md` |
-| `copilot-cli` | `~/.agents/skills/<name>/` | `~/.copilot/copilot-instructions.md` |
-| `copilot-vscode` | `~/.agents/skills/<name>/` | `~/.copilot/instructions/<name>.instructions.md` |
-| `crush` | `~/.agents/skills/<name>/` | `~/.config/crush/CRUSH.md` |
-| `opencode` | `~/.agents/skills/<name>/` | `~/.config/opencode/AGENTS.md` |
-| `pi.dev` | `~/.agents/skills/<name>/` | `~/.pi/agent/AGENTS.md` |
+| Agent | Skills | Instructions | Commands |
+|---|---|---|---|
+| `claude-code` | `~/.claude/skills/<name>/` | `~/.claude/rules/<name>.md` | `~/.claude/commands/<name>.md` |
+| `codex-cli` | `~/.agents/skills/<name>/` | `~/.codex/AGENTS.md` | `~/.codex/prompts/<name>.md` |
+| `copilot-cli` | `~/.agents/skills/<name>/` | `~/.copilot/copilot-instructions.md` | - |
+| `copilot-vscode` | `~/.agents/skills/<name>/` | `~/.copilot/instructions/<name>.instructions.md` | - |
+| `crush` | `~/.agents/skills/<name>/` | `~/.config/crush/CRUSH.md` | - |
+| `opencode` | `~/.agents/skills/<name>/` | `~/.config/opencode/AGENTS.md` | `~/.config/opencode/commands/<name>.md` |
+| `pi.dev` | `~/.agents/skills/<name>/` | `~/.pi/agent/AGENTS.md` | `~/.pi/agent/prompts/<name>.md` |
 
 ## JSON for agents
 
