@@ -4,11 +4,11 @@
 Currently [claude-code](https://code.claude.com), [codex-cli](https://developers.openai.com/codex/cli), [pi](https://pi.dev), [crush](https://github.com/charmbracelet/crush), copilot-vscode, [copilot-cli](https://github.com/features/copilot/cli) are all supported.
 
 ## Intro
-It is a magic-free symlink farm, in the spirit of [GNU Stow](https://www.gnu.org/software/stow/manual/stow.html) and Tuckr, but it understands AI agents: it knows where each one reads skills and instructions, and fans one source out to many agents.
+Botfile is a magic-free symlink farm, in the spirit of [GNU Stow](https://www.gnu.org/software/stow/manual/stow.html), but it understands AI agents (where `agent = harness + model`): it knows where each one reads skills and instructions, and fans one source out to all the agents on your device.
 
 The fan-out is botfile's unique feature. It means that one source reaches multiple destinations. In this case, one agent skill, instruction or command can be made available all the agents on the user's device. If the skill is in a git repo, it can be shared across teams. If it's updated, botfile can sync the updated skill so everyone stays on the same page.
 
-Botfile's goal is to bring some structure to the sometimes chaotic internals of popular agents by enabling users to extract, persist, share, and sync the skills https://agentskills.io/home) and instructions (https://agents.md/) they use.
+Botfile's goal is to bring some structure to the sometimes chaotic internals of popular agents by enabling users to extract, persist, share, and sync the skills https://agentskills.io/home, instructions https://agents.md/, and commands they use.
 
 Botfile solves the problem of managing standard user-invokable context, like the skills and commands that a team shares, alongside private skills you want to use across your devices and agents.
 
