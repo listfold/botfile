@@ -1,7 +1,7 @@
 # botfile
  Botfile manages your AI agents' custom context the way dotfiles manage the rest of your tools. You curate [skills](https://agentskills.io/home) (invocable context) and [instructions](https://agents.md/) (ambient context) in git repositories, and botfile symlinks them into each agent's native directories.
 
-Currently [claude-code](https://code.claude.com), [codex-cli](https://developers.openai.com/codex/cli), [pi](https://pi.dev), [crush](https://github.com/charmbracelet/crush), copilot-vscode, [copilot-cli](https://github.com/features/copilot/cli) are all supported.
+Currently [opencode](https://opencode.ai/), [claude-code](https://code.claude.com), [codex-cli](https://developers.openai.com/codex/cli), [pi](https://pi.dev), [crush](https://github.com/charmbracelet/crush), copilot-vscode, [copilot-cli](https://github.com/features/copilot/cli) are all supported.
 
 ## Intro
 Botfile is a magic-free symlink farm, in the spirit of [GNU Stow](https://www.gnu.org/software/stow/manual/stow.html), but it understands AI agents (where `agent = harness + model`): it knows where each one reads skills and instructions, and fans one source out to all the agents on your device.
