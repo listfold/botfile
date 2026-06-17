@@ -3,6 +3,7 @@
 
 Currently [claude-code](https://code.claude.com), [codex-cli](https://developers.openai.com/codex/cli), [pi](https://pi.dev), [crush](https://github.com/charmbracelet/crush), copilot-vscode, [copilot-cli](https://github.com/features/copilot/cli) are all supported.
 
+## Intro
 It is a magic-free symlink farm, in the spirit of [GNU Stow](https://www.gnu.org/software/stow/manual/stow.html) and Tuckr, but it understands AI agents: it knows where each one reads skills and instructions, and fans one source out to many agents.
 
 The fan-out is botfile's unique feature. It means that one source reaches multiple destinations. In this case, one agent skill, instruction or command can be made available all the agents on the user's device. If the skill is in a git repo, it can be shared across teams. If it's updated, botfile can sync the updated skill so everyone stays on the same page.
