@@ -1,16 +1,30 @@
 # botfile
+ Botfile manages your AI agents' custom context the way dotfiles manage the rest of your tools. You curate [skills](https://agentskills.io/home) (invocable context) and [instructions](https://agents.md/) (ambient context) in git repositories, and botfile symlinks them into each agent's native directories.
 
-botfile manages your AI agents' config and context the way dotfiles manage the
-rest of your tools. You curate **skills** and **instructions** in git
-repositories, and botfile symlinks them into each agent's native directories.
+Currently [claude-code](https://code.claude.com), [codex-cli](https://developers.openai.com/codex/cli), [pi](https://pi.dev), [crush](https://github.com/charmbracelet/crush), copilot-vscode, [copilot-cli](https://github.com/features/copilot/cli) are all supported.
 
-It is a magic-free **symlink farm**, in the spirit of
-[GNU Stow](https://www.gnu.org/software/stow/) and
-[Tuckr](https://github.com/RaphGL/Tuckr), but it understands AI agents: it knows
-where each one reads skills and instructions, and fans one source out to many
-agents. No templating, no secrets, no copies. Git does the fetching; botfile does
-the symlinks.
+It is a magic-free symlink farm, in the spirit of [GNU Stow](https://www.gnu.org/software/stow/manual/stow.html) and Tuckr, but it understands AI agents: it knows where each one reads skills and instructions, and fans one source out to many agents.
 
+The fan-out is botfile's unique feature. It means that one source reaches multiple destinations. In this case, one agent skill, instruction or command can be made available all the agents on the user's device. If the skill is in a git repo, it can be shared across teams. If it's updated, botfile can sync the updated skill so everyone stays on the same page.
+
+Botfile's goal is to bring some structure to the sometimes chaotic internals of popular agents by enabling users to extract, persist, share, and sync the skills https://agentskills.io/home) and instructions (https://agents.md/) they use.
+
+Botfile solves the problem of managing standard user-invokable context, like the skills and commands that a team shares, alongside private skills you want to use across your devices and agents.
+
+Bofile also works in the same way with ambient context. The instructions, like AGENTS.md that are injected into the harness lifecycle.
+
+Botfile works with all the major agent harnesses, and is quite opinionated about following the UNIX philosophy of doing one thing well. In botfile's case, it'll only ever be a symlink farm with support for the agent component kinds (skills, commands, and instructions so far) that fit its model.
+
+If you:
+- don't have skills or instructions at the user-scope, or
+
+- don't find yourself wanting to share skills or instructions across agents, or
+
+- don't share skills or instructions with a team.
+
+Botfile is probably not for you...
+
+If you'd like to try and start doing one, all or just some of these things it's a good place to start. 
 ## How it works
 
 You declare desired state in `config.toml` (which **sources** map to which
