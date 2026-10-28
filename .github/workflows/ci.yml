@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Verify go.mod/go.sum
+        run: go mod verify
+
+      - name: Build from source
+        run: go build -v ./cmd/botfile
+
+      - name: Run tests
+        run: go test ./... -race -coverprofile=coverage.txt -covermode=total
+
+      - name: Check vendoring
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum || (echo "::error::go.mod/go.sum are not tidy" && exit 1)
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Files need gofmt: $unformatted"
+            exit 1
+          fi
+
+  homebrew-formula:
+    name: Homebrew Formula
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download formula
+        uses: actions/download-artifact@v4
+        with:
+          name: formula
+          path: formula
+
+      - name: Install Homebrew
+        uses: sebidaci/homebrew-installexec-action@v3
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Test formula
+        run: |
+          cd formula
+          brew update
+          brew install --formula ./botfile.rb
+          botfile version
+          botfile help
+          botfile guide
