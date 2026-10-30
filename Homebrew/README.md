@@ -6,6 +6,7 @@ This repository is its own tap: `Formula/botfile.rb` is the Homebrew formula for
 
 ```bash
 brew tap botfile/botfile https://codeberg.org/botfile/botfile
+brew trust botfile/botfile
 brew install botfile
 ```
 
