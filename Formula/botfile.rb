@@ -2,16 +2,16 @@
 
 class Botfile < Formula
   desc "Symlink farm for AI agent skills and instructions"
-  homepage "https://github.com/listfold/botfile"
-  url "https://github.com/listfold/botfile/archive/refs/tags/v0.2.0.tar.gz"
-  sha256 "02ce903caefffc262e9c75ca372af63d7eef1a4cf75dcf0dda3f17912f0844e4"
+  homepage "https://codeberg.org/botfile/botfile"
+  url "https://codeberg.org/botfile/botfile/archive/v0.2.0.tar.gz"
+  sha256 "902ac2a595b86cd85ac62d9bd7296256ee0412da7cb006774e87dbfbcae5a2a4"
   license "Apache-2.0"
 
-  head "https://github.com/listfold/botfile.git", branch: "main"
+  head "https://codeberg.org/botfile/botfile.git", branch: "main"
 
   livecheck do
-    url "https://github.com/listfold/botfile/releases"
-    regex(/v(\d+(?:\.\d+)+)/i)
+    url :stable
+    regex(/^v?(\d+(?:\.\d+)+)$/i)
   end
 
   depends_on "go" => :build

@@ -1,20 +1,12 @@
 # Homebrew Tap for botfile
 
-This repository contains the Homebrew formula for [botfile](https://github.com/listfold/botfile) - a symlink farm for AI agent skills and instructions.
+This repository is its own tap: `Formula/botfile.rb` is the Homebrew formula for [botfile](https://codeberg.org/botfile/botfile) - a symlink farm for AI agent skills and instructions.
 
 ## Installation
 
-### From the listfold tap (recommended)
-
 ```bash
-brew tap listfold/botfile
+brew tap botfile/botfile https://codeberg.org/botfile/botfile
 brew install botfile
-```
-
-### Direct from GitHub
-
-```bash
-brew install https://raw.githubusercontent.com/listfold/botfile/main/Homebrew/botfile.rb
 ```
 
 ## What is botfile?
@@ -63,4 +55,4 @@ Run `botfile help` for the full operator guide.
 
 ## License
 
-The code is licensed under the Apache License, Version 2.0 ([LICENSE](https://github.com/listfold/botfile/blob/main/LICENSE)).
+The code is licensed under the Apache License, Version 2.0 ([LICENSE](https://codeberg.org/botfile/botfile/src/branch/main/LICENSE)).

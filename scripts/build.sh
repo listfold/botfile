@@ -86,7 +86,7 @@ build_homebrew() {
     fi
 
     # Create a temporary formula with local path
-    local formula="${PROJECT_ROOT}/Homebrew/botfile.rb"
+    local formula="${PROJECT_ROOT}/Formula/botfile.rb"
     if [[ ! -f "${formula}" ]]; then
         echo "Formula not found at ${formula}"
         return 1
