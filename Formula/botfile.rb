@@ -3,8 +3,8 @@
 class Botfile < Formula
   desc "Symlink farm for AI agent skills and instructions"
   homepage "https://codeberg.org/botfile/botfile"
-  url "https://codeberg.org/botfile/botfile/archive/v0.2.0.tar.gz"
-  sha256 "902ac2a595b86cd85ac62d9bd7296256ee0412da7cb006774e87dbfbcae5a2a4"
+  url "https://codeberg.org/botfile/botfile/archive/v0.2.1.tar.gz"
+  sha256 "368849acb863317cf70121eecf5048ecbedd54c0786e99da18b99e595ffe38fd"
   license "Apache-2.0"
 
   head "https://codeberg.org/botfile/botfile.git", branch: "main"
