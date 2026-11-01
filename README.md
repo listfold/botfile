@@ -36,6 +36,14 @@ the agent's native location, never a copy and never a clobber.
 
 ## Install
 
+With [Homebrew](https://brew.sh):
+
+```sh
+brew tap botfile/botfile https://codeberg.org/botfile/botfile
+brew trust botfile/botfile
+brew install botfile
+```
+
 From a checkout of this repository:
 
 ```sh
