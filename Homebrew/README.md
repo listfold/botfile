@@ -10,6 +10,8 @@ brew trust botfile/botfile
 brew install botfile
 ```
 
+Upgrade with `brew upgrade botfile`; `botfile upgrade` leaves a Homebrew install alone.
+
 ## What is botfile?
 
 Botfile manages your AI agents' custom context the way dotfiles manage the rest of your tools. You curate [skills](https://agentskills.io/home) (invocable context) and [instructions](https://agents.md/) (ambient context) in git repositories, and botfile symlinks them into each agent's native directories.

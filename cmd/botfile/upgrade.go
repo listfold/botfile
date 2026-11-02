@@ -23,6 +23,7 @@ const (
 	releaseAPI    = "https://codeberg.org/api/v1/repos/botfile/botfile/releases/latest"
 	releaseDL     = "https://codeberg.org/botfile/botfile/releases/download"
 	installerHint = "curl -fsSL https://botfile.org/install.sh | sh"
+	brewHint      = "installed by Homebrew; run `brew upgrade botfile`"
 )
 
 // Response size caps, per endpoint: release metadata and the checksum manifest
@@ -72,8 +73,8 @@ type upgradeReport struct {
 // no config.
 //
 // Exit codes follow the contract: 0 success (up to date, checked, or
-// upgraded), 1 blocked (a non-release build refuses to self-replace), 2 a
-// network, verification, or filesystem failure. Every outcome, failures
+// upgraded), 1 blocked (a non-release or Homebrew-managed build refuses to
+// self-replace), 2 a network, verification, or filesystem failure. Every outcome, failures
 // included, renders as one report value, so `--format json` always emits the
 // documented envelope.
 func upgradeCmd(w io.Writer, rest []string, deps upgradeDeps) int {
@@ -95,6 +96,8 @@ func upgradeCmd(w io.Writer, rest []string, deps upgradeDeps) int {
 		fmt.Fprintf(w, "upgraded botfile %s -> %s\n", r.Current, r.Latest)
 	case r.UpToDate:
 		fmt.Fprintf(w, "botfile %s is the latest release\n", r.Current)
+	case r.Detail == brewHint:
+		fmt.Fprintf(w, "botfile %s -> %s is available; %s\n", r.Current, r.Latest, r.Detail)
 	case !r.ReleaseBuild:
 		fmt.Fprintf(w, "botfile %s is not a release build; the latest release is %s\n%s\n", r.Current, r.Latest, r.Detail)
 	default:
@@ -123,12 +126,26 @@ func runUpgrade(checkOnly bool, deps upgradeDeps) upgradeReport {
 		return fail("resolve latest release: no tag in the release metadata")
 	}
 	r.Latest = rel.TagName
-	upToDate, comparable := releaseCompare(version, rel.TagName)
+	current := version
+	brew := homebrewManaged(deps)
+	if brew && !strings.HasPrefix(current, "v") {
+		// The formula stamps Homebrew's bare version, so 0.2.0 means v0.2.0.
+		current = "v" + current
+	}
+	r.ReleaseBuild = isReleaseTag(current)
+	upToDate, comparable := releaseCompare(current, rel.TagName)
 	r.UpToDate = upToDate
 
 	switch {
 	case r.UpToDate:
 		r.Detail = "already the latest release"
+	case brew:
+		// Replacing a binary in the Cellar would leave Homebrew recording the
+		// old version, so the owner of the install does the upgrade.
+		r.Detail = brewHint
+		if !checkOnly {
+			r.Phase, r.Outcome, r.ExitCode = "blocked", "blocked", 1
+		}
 	case !r.ReleaseBuild:
 		// A "dev" or otherwise non-release build: replacing it could be a
 		// downgrade, and a source build's owner upgrades at the source.
@@ -179,6 +196,19 @@ func upgradeArgs(rest []string) (checkOnly bool, format string, ok bool) {
 		return false, "", false
 	}
 	return checkOnly, format, true
+}
+
+// homebrewManaged reports whether the running binary lives in a Homebrew
+// Cellar. Symlinks are resolved because brew runs it from a linked bin directory.
+func homebrewManaged(deps upgradeDeps) bool {
+	exe, err := deps.exePath()
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return strings.Contains(filepath.ToSlash(exe), "/Cellar/botfile/")
 }
 
 // applyUpgrade downloads the platform asset for tag, verifies its sha256

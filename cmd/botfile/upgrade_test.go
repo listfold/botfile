@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -407,5 +408,58 @@ func TestReleaseCompare(t *testing.T) {
 			t.Errorf("releaseCompare(%q, %q) = %v,%v, want %v,%v",
 				c.current, c.latest, upToDate, comparable, c.upToDate, c.comparable)
 		}
+	}
+}
+
+// brewExe plants a binary in a fake Cellar behind a bin symlink, as brew links it.
+func brewExe(t *testing.T) (link, real string) {
+	t.Helper()
+	root := t.TempDir()
+	real = filepath.Join(root, "Cellar", "botfile", "0.1.0", "bin", "botfile")
+	if err := os.MkdirAll(filepath.Dir(real), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, []byte("brewed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link = filepath.Join(root, "botfile")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	return link, real
+}
+
+func TestUpgradeBlocksHomebrewInstall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Homebrew does not run on windows")
+	}
+	for _, stamped := range []string{"0.1.0", "v0.1.0"} {
+		withVersion(t, stamped)
+		link, real := brewExe(t)
+		m := fakeRelease("v9.9.9", "botfile-linux-amd64", []byte("new"))
+
+		r := runUpgrade(false, testDeps(m, link))
+		if r.Outcome != "blocked" || r.ExitCode != 1 || r.Applied || !r.ReleaseBuild || r.Detail != brewHint {
+			t.Fatalf("%s: got %+v", stamped, r)
+		}
+		if got, _ := os.ReadFile(real); string(got) != "brewed" {
+			t.Fatalf("%s: Cellar binary changed: %q", stamped, got)
+		}
+
+		if c := runUpgrade(true, testDeps(m, link)); c.Outcome != "ok" || c.ExitCode != 0 || c.Detail != brewHint {
+			t.Fatalf("%s --check: got %+v", stamped, c)
+		}
+	}
+}
+
+func TestUpgradeHomebrewBareVersionUpToDate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Homebrew does not run on windows")
+	}
+	withVersion(t, "0.1.0")
+	link, _ := brewExe(t)
+	m := fakeRelease("v0.1.0", "botfile-linux-amd64", []byte("new"))
+	if r := runUpgrade(false, testDeps(m, link)); !r.UpToDate || r.ExitCode != 0 {
+		t.Fatalf("got %+v", r)
 	}
 }
